@@ -15,7 +15,7 @@ class MilvusSyncService:
         self.collections = ["document_embeddings", "faq_embeddings"]
 
         self.batch_size = 100
-        self.sync_interval = 10  # seconds between sync checks
+        self.sync_interval = 5  # seconds between sync checks
 
     async def connect_all(self):
         """Connect both Milvus servers"""

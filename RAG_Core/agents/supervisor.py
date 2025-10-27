@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class SupervisorAgent:
     def __init__(self):
         self.name = "SUPERVISOR"
-        self.classification_prompt = """Bạn là chuyên viên đào tạo kỹ năng chuyển đổi số cho người dân - người điều phối chính của hệ thống chatbot.
+        self.classification_prompt = """Bạn là chuyên viên đào tạo kỹ năng chuyển đổi số, kiến thức sử dụng công nghệ thông tin cơ bản cho người dân - người điều phối chính của hệ thống chatbot.
 
 Nhiệm vụ:
 1. Dựa vào lịch sử hội thoại và câu hỏi hiện tại, hãy xác định ngữ cảnh (context) mà người dùng đang đề cập đến.
@@ -81,6 +81,13 @@ Chỉ trả về JSON, không thêm text nào khác."""
             contextualized_question = context_info["contextualized_question"]
             is_followup = context_info["is_followup"]
             relevant_context = context_info["relevant_context"]
+
+            # Nếu LLM không xác định được ngữ cảnh hợp lệ → coi như câu hỏi độc lập
+            if "[cần làm rõ]" in contextualized_question:
+                logger.info("Context unclear → xử lý như câu hỏi mới.")
+                contextualized_question = question
+                is_followup = False
+                relevant_context = ""
 
             logger.info(f"Original Q: {question}")
             logger.info(f"Contextualized Q: {contextualized_question}")

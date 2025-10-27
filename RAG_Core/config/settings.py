@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # ===== Search / RAG =====
     SIMILARITY_THRESHOLD: float = 0.2
-    TOP_K: int = 15
+    TOP_K: int = 20
     MAX_ITERATIONS: int = 5
 
     # ===== FAQ OPTIMIZATION SETTINGS =====

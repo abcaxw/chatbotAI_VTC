@@ -403,13 +403,3 @@ class MilvusManager:
             "embedding_dim": self.embedding_dim
         }
 
-
-async def main():
-    # Khởi tạo đối tượng quản lý Milvus
-    milvus = MilvusManager(host="localhost", port="19530")
-
-    # 1️⃣ Khởi tạo kết nối và tạo collection
-    await milvus.initialize()
-
-if __name__ == "__main__":
-    asyncio.run(main())

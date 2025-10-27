@@ -27,7 +27,7 @@ Nguyên tắc xử lý:
 1. **Nhận diện câu hỏi phụ thuộc ngữ cảnh:**
    - Chứa đại từ: "nó", "đó", "này", "cái đó", "điều này"
    - Chứa từ chỉ thứ tự: "thứ nhất", "thứ 2", "mục 3", "điểm 4", "cái cuối"
-   - Chứa từ tham chiếu: "tiếp tục", "chi tiết hơn", "giải thích thêm", "còn...", "thế còn..."
+   - Chứa từ tham chiếu: "tiếp tục", "chi tiết hơn", "giải thích thêm", "còn...", "thế còn...", "OK", "Okay", "có", "co", "vâng",...
    - Chỉ có một từ/cụm từ ngắn: "chi tiết", "ví dụ", "tại sao", "như thế nào"
 
 2. **Tìm ngữ cảnh từ lịch sử:**
