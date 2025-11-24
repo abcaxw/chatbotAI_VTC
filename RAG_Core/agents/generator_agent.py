@@ -24,7 +24,6 @@ Lịch sử trò chuyện gần đây:
 
 Yêu cầu trả lời:
 - Trả lời bằng giọng văn tự nhiên như người Việt Nam nói chuyện
-- KHÔNG sử dụng markdown, bullet points hay định dạng đặc biệt
 - Trả lời thẳng vào vấn đề, ngắn gọn súc tích
 - Dựa vào thông tin tài liệu nhưng diễn đạt theo cách hiểu của bạn
 - Kết thúc bằng câu hỏi ngắn để tiếp tục hỗ trợ nếu cần
@@ -53,7 +52,6 @@ Hãy trả lời như đang nói chuyện trực tiếp với khách hàng:"""
 
 📋 YÊU CẦU CHUNG:
 - Trả lời bằng giọng văn tự nhiên như người Việt Nam nói chuyện
-- KHÔNG sử dụng markdown, bullet points hay định dạng đặc biệt
 - Ngắn gọn, súc tích, đúng trọng tâm
 - Kết thúc bằng câu hỏi để tiếp tục hỗ trợ nếu cần
 

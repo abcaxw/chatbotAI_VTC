@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 
 
 class DocumentProcessingAPITester:
-    def __init__(self, base_url: str = "https://f7a9e2724f33.ngrok-free.app"):
+    def __init__(self, base_url: str = "http://localhost:8000/"):
         self.base_url = base_url
         self.session = requests.Session()
 

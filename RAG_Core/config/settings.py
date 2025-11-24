@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # ===== Embedding =====
     EMBEDDING_MODEL: str = "keepitreal/vietnamese-sbert"
-    EMBEDDING_DIM: int = 1024
+    EMBEDDING_DIM: int = 768
 
     # ===== Search / RAG =====
     SIMILARITY_THRESHOLD: float = 0.2

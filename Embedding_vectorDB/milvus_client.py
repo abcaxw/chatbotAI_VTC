@@ -5,30 +5,30 @@ import uuid
 
 
 class MilvusManager:
-    def __init__(self, host: str = "103.252.0.129", port: str = "19530"):
+    def __init__(self, host: str = "localhost", port: str = "19530"):
         self.host = host
         self.port = port
         self.collection_name = "document_embeddings"
         self.faq_collection_name = "faq_embeddings"
         self.collection = None
         self.faq_collection = None
-        self.embedding_dim = 1024
 
-        # Field length limits (leave buffer below Milvus limits)
+        # THAY ĐỔI: 1024 -> 768 dimensions
+        self.embedding_dim = 768
+
+        # Field length limits
         self.max_id_length = 190
         self.max_document_id_length = 90
-        self.max_description_length = 60000  # Buffer below 65000
+        self.max_description_length = 60000
         self.max_question_length = 60000
         self.max_answer_length = 60000
 
     async def initialize(self):
         """Initialize Milvus connection and create collections"""
         try:
-            # Connect to Milvus
             connections.connect("default", host=self.host, port=self.port)
             print(f"Connected to Milvus at {self.host}:{self.port}")
 
-            # Create collections if not exists
             await self.create_collection()
             await self.create_faq_collection()
 
@@ -49,39 +49,37 @@ class MilvusManager:
         return validated
 
     async def create_collection(self):
-        """Create collection with specified schema"""
+        """Create collection with 768D vectors"""
         try:
-            # Check if collection exists
             if utility.has_collection(self.collection_name):
                 print(f"Collection {self.collection_name} already exists")
                 self.collection = Collection(self.collection_name)
                 return
 
-            # Define schema with safe field lengths
+            # THAY ĐỔI: dim=768
             fields = [
                 FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=200, is_primary=True),
                 FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=100),
                 FieldSchema(name="description", dtype=DataType.VARCHAR, max_length=65000),
-                FieldSchema(name="description_vector", dtype=DataType.FLOAT_VECTOR, dim=self.embedding_dim)
+                FieldSchema(name="description_vector", dtype=DataType.FLOAT_VECTOR, dim=768)
             ]
 
             schema = CollectionSchema(
                 fields=fields,
-                description="Document embeddings collection"
+                description="Document embeddings collection (768D)"
             )
 
-            # Create collection
             self.collection = Collection(
                 name=self.collection_name,
                 schema=schema,
                 using='default'
             )
 
-            # Create index for vector field
+            # Create index
             index_params = {
                 "metric_type": "COSINE",
                 "index_type": "IVF_FLAT",
-                "params": {"nlist": 1024}
+                "params": {"nlist": 768}
             }
 
             self.collection.create_index(
@@ -89,46 +87,44 @@ class MilvusManager:
                 index_params=index_params
             )
 
-            print(f"Collection {self.collection_name} created successfully")
+            print(f"Collection {self.collection_name} created successfully with 768D vectors")
 
         except Exception as e:
             print(f"Collection creation error: {e}")
             raise e
 
     async def create_faq_collection(self):
-        """Create FAQ collection with specified schema"""
+        """Create FAQ collection with 768D vectors"""
         try:
-            # Check if collection exists
             if utility.has_collection(self.faq_collection_name):
                 print(f"Collection {self.faq_collection_name} already exists")
                 self.faq_collection = Collection(self.faq_collection_name)
                 return
 
-            # Define schema for FAQ
+            # THAY ĐỔI: dim=768
             fields = [
                 FieldSchema(name="faq_id", dtype=DataType.VARCHAR, max_length=100, is_primary=True),
                 FieldSchema(name="question", dtype=DataType.VARCHAR, max_length=65000),
                 FieldSchema(name="answer", dtype=DataType.VARCHAR, max_length=65000),
-                FieldSchema(name="question_vector", dtype=DataType.FLOAT_VECTOR, dim=self.embedding_dim)
+                FieldSchema(name="question_vector", dtype=DataType.FLOAT_VECTOR, dim=768)
             ]
 
             schema = CollectionSchema(
                 fields=fields,
-                description="FAQ embeddings collection"
+                description="FAQ embeddings collection (768D)"
             )
 
-            # Create collection
             self.faq_collection = Collection(
                 name=self.faq_collection_name,
                 schema=schema,
                 using='default'
             )
 
-            # Create index for vector field
+            # Create index
             index_params = {
                 "metric_type": "COSINE",
                 "index_type": "IVF_FLAT",
-                "params": {"nlist": 1024}
+                "params": {"nlist": 768}
             }
 
             self.faq_collection.create_index(
@@ -136,7 +132,7 @@ class MilvusManager:
                 index_params=index_params
             )
 
-            print(f"Collection {self.faq_collection_name} created successfully")
+            print(f"Collection {self.faq_collection_name} created successfully with 768D vectors")
 
         except Exception as e:
             print(f"FAQ Collection creation error: {e}")
@@ -151,7 +147,6 @@ class MilvusManager:
             if not embeddings_data:
                 return 0
 
-            # Validate and prepare data
             field_limits = {
                 "id": self.max_id_length,
                 "document_id": self.max_document_id_length,
@@ -160,15 +155,13 @@ class MilvusManager:
 
             validated_data = []
             for item in embeddings_data:
-                # Ensure all required fields exist
                 if not all(key in item for key in ["id", "document_id", "description", "description_vector"]):
                     print(f"Skipping item missing required fields: {item.keys()}")
                     continue
 
-                # Validate and truncate fields
                 validated_item = self._validate_and_truncate(item, field_limits)
 
-                # Ensure vector has correct dimension
+                # Validate vector dimension = 768
                 if len(validated_item["description_vector"]) != self.embedding_dim:
                     print(f"Skipping item with incorrect vector dimension: {len(validated_item['description_vector'])}")
                     continue
@@ -185,7 +178,7 @@ class MilvusManager:
             descriptions = [item["description"] for item in validated_data]
             vectors = [item["description_vector"] for item in validated_data]
 
-            # Insert data in batches to avoid memory issues
+            # Insert in batches
             batch_size = 100
             total_inserted = 0
 
@@ -203,12 +196,9 @@ class MilvusManager:
                     print(f"Inserted batch {i // batch_size + 1}: {len(batch_ids)} items")
                 except Exception as batch_error:
                     print(f"Error inserting batch {i // batch_size + 1}: {batch_error}")
-                    # Continue with next batch
                     continue
 
-            # Load collection to make it searchable
             self.collection.load()
-
             print(f"Total inserted: {total_inserted} embeddings")
             return total_inserted
 
@@ -217,12 +207,11 @@ class MilvusManager:
             raise e
 
     async def insert_faq(self, faq_id: str, question: str, answer: str, question_vector: List[float]) -> bool:
-        """Insert FAQ into FAQ collection with validation"""
+        """Insert FAQ with 768D vector"""
         try:
             if not self.faq_collection:
                 raise Exception("FAQ Collection not initialized")
 
-            # Validate field lengths
             if len(faq_id) > 90:
                 faq_id = faq_id[:90]
             if len(question) > self.max_question_length:
@@ -230,17 +219,13 @@ class MilvusManager:
             if len(answer) > self.max_answer_length:
                 answer = answer[:self.max_answer_length - 3] + "..."
 
+            # Validate 768D
             if len(question_vector) != self.embedding_dim:
                 print(f"Invalid vector dimension: {len(question_vector)}")
                 return False
 
-            # Prepare data for insertion
             entities = [[faq_id], [question], [answer], [question_vector]]
-
-            # Insert data
             insert_result = self.faq_collection.insert(entities)
-
-            # Load collection to make it searchable
             self.faq_collection.load()
 
             print(f"Inserted FAQ with id: {faq_id}")
@@ -256,7 +241,6 @@ class MilvusManager:
             if not self.faq_collection:
                 raise Exception("FAQ Collection not initialized")
 
-            # Delete by primary key
             expr = f'faq_id == "{faq_id}"'
             delete_result = self.faq_collection.delete(expr)
 
@@ -268,12 +252,11 @@ class MilvusManager:
             return False
 
     async def delete_document(self, document_id: str) -> int:
-        """Delete all embeddings for a specific document_id"""
+        """Delete all embeddings for a document"""
         try:
             if not self.collection:
                 raise Exception("Collection not initialized")
 
-            # Delete by document_id
             expr = f'document_id == "{document_id}"'
             delete_result = self.collection.delete(expr)
 
@@ -372,11 +355,13 @@ class MilvusManager:
                 self.collection.load()
                 stats["document_count"] = self.collection.num_entities
                 stats["document_collection_name"] = self.collection_name
+                stats["document_vector_dim"] = self.embedding_dim
 
             if self.faq_collection:
                 self.faq_collection.load()
                 stats["faq_count"] = self.faq_collection.num_entities
                 stats["faq_collection_name"] = self.faq_collection_name
+                stats["faq_vector_dim"] = self.embedding_dim
 
             return stats
 
@@ -403,3 +388,18 @@ class MilvusManager:
             "embedding_dim": self.embedding_dim
         }
 
+
+async def main():
+    # Khởi tạo MilvusManager
+    milvus = MilvusManager(
+        host="localhost",
+        port="19530",
+    )
+
+    # Kết nối & tạo collection
+    await milvus.initialize()
+
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

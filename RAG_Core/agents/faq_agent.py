@@ -54,9 +54,8 @@ Kết quả tìm kiếm FAQ (đã được rerank):
 Hướng dẫn đặc biệt cho follow-up:
 1. Nhận biết đây là câu hỏi tiếp theo, không phải câu hỏi mới
 2. Sử dụng FAQ có rerank_score > {rerank_threshold}
-3. KHÔNG sử dụng markdown, bullet points hay định dạng đặc biệt
-4. Nếu không tìm thấy FAQ phù hợp, trả về "NOT_FOUND"
-5. Có thể kết hợp thông tin từ ngữ cảnh trước và FAQ mới
+3. Nếu không tìm thấy FAQ phù hợp, trả về "NOT_FOUND"
+4. Có thể kết hợp thông tin từ ngữ cảnh trước và FAQ mới
 
 Trả lời:"""
 

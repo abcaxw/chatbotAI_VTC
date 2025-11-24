@@ -3,22 +3,23 @@ import torch
 from typing import List
 import numpy as np
 
+
 class EmbeddingService:
     def __init__(self, model_name: str = "keepitreal/vietnamese-sbert"):
         """
         Initialize Vietnamese embedding model
-        You can replace with other Vietnamese models like:
-        - "VoVanPhuc/sup-SimCSE-VietNamese-phobert-base"
-        - "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        THAY ĐỔI: Embedding dimension = 768
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading embedding model on {self.device}")
 
-
         self.model = SentenceTransformer(model_name)
         self.model = self.model.to(self.device)
-        self.embedding_dim = 1024  # Adjust based on your model
+
+        # THAY ĐỔI: 1024 -> 768 dimensions
+        self.embedding_dim = 768
         print(f"Model loaded successfully. Embedding dimension: {self.embedding_dim}")
+
     def get_embedding(self, text: str) -> List[float]:
         """Generate embedding for input text"""
         try:
