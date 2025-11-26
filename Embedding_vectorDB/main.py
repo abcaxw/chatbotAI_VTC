@@ -30,11 +30,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+milvus_host = os.getenv('MILVUS_HOST', 'localhost')
+milvus_port = os.getenv('MILVUS_PORT', '19530')
+milvus_manager = MilvusManager(host=milvus_host, port=milvus_port)
 # Initialize services
 doc_processor = DocumentProcessor()
 embedding_service = EmbeddingService()
-milvus_manager = MilvusManager()
 
 
 def sanitize_filename(filename: str) -> str:

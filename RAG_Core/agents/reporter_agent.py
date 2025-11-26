@@ -33,6 +33,7 @@ Tình trạng: {db_status.get("message", "Đang kiểm tra")}
 📞 Gọi hotline: {settings.SUPPORT_PHONE}
 ⏰ Thời gian hỗ trợ: 24/7
 
+
 Chúng tôi xin lỗi về sự bất tiện này và cảm ơn sự kiên nhẫn của bạn!"""
 
             return {

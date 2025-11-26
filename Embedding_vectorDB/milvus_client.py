@@ -2,6 +2,7 @@ from pymilvus import connections, Collection, FieldSchema, CollectionSchema, Dat
 from typing import List, Dict, Any
 import asyncio
 import uuid
+import time
 
 
 class MilvusManager:
@@ -12,8 +13,8 @@ class MilvusManager:
         self.faq_collection_name = "faq_embeddings"
         self.collection = None
         self.faq_collection = None
+        self.is_initialized = False  # NEW: Track initialization status
 
-        # THAY ĐỔI: 1024 -> 768 dimensions
         self.embedding_dim = 768
 
         # Field length limits
@@ -23,18 +24,46 @@ class MilvusManager:
         self.max_question_length = 60000
         self.max_answer_length = 60000
 
-    async def initialize(self):
-        """Initialize Milvus connection and create collections"""
-        try:
-            connections.connect("default", host=self.host, port=self.port)
-            print(f"Connected to Milvus at {self.host}:{self.port}")
+    async def initialize(self, max_retries: int = 5, retry_delay: int = 2):
+        """Initialize Milvus connection and create collections with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                print(
+                    f"Attempting to connect to Milvus at {self.host}:{self.port} (attempt {attempt + 1}/{max_retries})")
 
-            await self.create_collection()
-            await self.create_faq_collection()
+                # Close existing connection if any
+                try:
+                    connections.disconnect("default")
+                except:
+                    pass
 
-        except Exception as e:
-            print(f"Milvus initialization error: {e}")
-            raise e
+                connections.connect("default", host=self.host, port=self.port)
+                print(f"✅ Connected to Milvus at {self.host}:{self.port}")
+
+                await self.create_collection()
+                await self.create_faq_collection()
+
+                self.is_initialized = True
+                print("✅ Milvus initialization completed successfully")
+                return True
+
+            except Exception as e:
+                print(f"❌ Milvus initialization error (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    print(f"❌ Failed to initialize Milvus after {max_retries} attempts")
+                    self.is_initialized = False
+                    raise e
+
+    def _check_initialized(self):
+        """Check if Milvus is initialized, raise exception if not"""
+        if not self.is_initialized:
+            raise Exception(
+                "Milvus is not initialized. The service may be unavailable. "
+                "Please check Milvus connection and restart the application."
+            )
 
     def _validate_and_truncate(self, data: Dict[str, Any], field_limits: Dict[str, int]) -> Dict[str, Any]:
         """Validate and truncate fields to fit Milvus limits"""
@@ -54,9 +83,10 @@ class MilvusManager:
             if utility.has_collection(self.collection_name):
                 print(f"Collection {self.collection_name} already exists")
                 self.collection = Collection(self.collection_name)
+                self.collection.load()
+                print(f"✅ Loaded existing collection {self.collection_name}")
                 return
 
-            # THAY ĐỔI: dim=768
             fields = [
                 FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=200, is_primary=True),
                 FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=100),
@@ -79,7 +109,7 @@ class MilvusManager:
             index_params = {
                 "metric_type": "COSINE",
                 "index_type": "IVF_FLAT",
-                "params": {"nlist": 768}
+                "params": {"nlist": 1024}
             }
 
             self.collection.create_index(
@@ -87,10 +117,11 @@ class MilvusManager:
                 index_params=index_params
             )
 
-            print(f"Collection {self.collection_name} created successfully with 768D vectors")
+            self.collection.load()
+            print(f"✅ Collection {self.collection_name} created and loaded successfully with 768D vectors")
 
         except Exception as e:
-            print(f"Collection creation error: {e}")
+            print(f"❌ Collection creation error: {e}")
             raise e
 
     async def create_faq_collection(self):
@@ -99,9 +130,10 @@ class MilvusManager:
             if utility.has_collection(self.faq_collection_name):
                 print(f"Collection {self.faq_collection_name} already exists")
                 self.faq_collection = Collection(self.faq_collection_name)
+                self.faq_collection.load()
+                print(f"✅ Loaded existing collection {self.faq_collection_name}")
                 return
 
-            # THAY ĐỔI: dim=768
             fields = [
                 FieldSchema(name="faq_id", dtype=DataType.VARCHAR, max_length=100, is_primary=True),
                 FieldSchema(name="question", dtype=DataType.VARCHAR, max_length=65000),
@@ -124,7 +156,7 @@ class MilvusManager:
             index_params = {
                 "metric_type": "COSINE",
                 "index_type": "IVF_FLAT",
-                "params": {"nlist": 768}
+                "params": {"nlist": 1024}
             }
 
             self.faq_collection.create_index(
@@ -132,17 +164,27 @@ class MilvusManager:
                 index_params=index_params
             )
 
-            print(f"Collection {self.faq_collection_name} created successfully with 768D vectors")
+            self.faq_collection.load()
+            print(f"✅ Collection {self.faq_collection_name} created and loaded successfully with 768D vectors")
 
         except Exception as e:
-            print(f"FAQ Collection creation error: {e}")
+            print(f"❌ FAQ Collection creation error: {e}")
             raise e
 
     async def insert_embeddings(self, embeddings_data: List[Dict]) -> int:
         """Insert embeddings into collection with validation"""
         try:
+            # Check initialization status
+            self._check_initialized()
+
             if not self.collection:
-                raise Exception("Collection not initialized")
+                raise Exception("Collection not initialized. Call initialize() first.")
+
+            # Ensure collection is loaded before insertion
+            try:
+                self.collection.load()
+            except Exception as load_error:
+                print(f"Warning: Could not load collection: {load_error}")
 
             if not embeddings_data:
                 return 0
@@ -198,19 +240,28 @@ class MilvusManager:
                     print(f"Error inserting batch {i // batch_size + 1}: {batch_error}")
                     continue
 
-            self.collection.load()
-            print(f"Total inserted: {total_inserted} embeddings")
+            # Flush after insertion to persist data
+            self.collection.flush()
+            print(f"✅ Total inserted: {total_inserted} embeddings")
             return total_inserted
 
         except Exception as e:
-            print(f"Insert error: {e}")
+            print(f"❌ Insert error: {e}")
             raise e
 
     async def insert_faq(self, faq_id: str, question: str, answer: str, question_vector: List[float]) -> bool:
         """Insert FAQ with 768D vector"""
         try:
+            self._check_initialized()
+
             if not self.faq_collection:
                 raise Exception("FAQ Collection not initialized")
+
+            # Ensure collection is loaded
+            try:
+                self.faq_collection.load()
+            except Exception as load_error:
+                print(f"Warning: Could not load FAQ collection: {load_error}")
 
             if len(faq_id) > 90:
                 faq_id = faq_id[:90]
@@ -226,52 +277,61 @@ class MilvusManager:
 
             entities = [[faq_id], [question], [answer], [question_vector]]
             insert_result = self.faq_collection.insert(entities)
-            self.faq_collection.load()
+            self.faq_collection.flush()
 
-            print(f"Inserted FAQ with id: {faq_id}")
+            print(f"✅ Inserted FAQ with id: {faq_id}")
             return True
 
         except Exception as e:
-            print(f"FAQ Insert error: {e}")
+            print(f"❌ FAQ Insert error: {e}")
             return False
 
     async def delete_faq(self, faq_id: str) -> bool:
         """Delete FAQ by ID"""
         try:
+            self._check_initialized()
+
             if not self.faq_collection:
                 raise Exception("FAQ Collection not initialized")
 
             expr = f'faq_id == "{faq_id}"'
             delete_result = self.faq_collection.delete(expr)
 
-            print(f"Deleted FAQ with id: {faq_id}")
+            print(f"✅ Deleted FAQ with id: {faq_id}")
             return True
 
         except Exception as e:
-            print(f"FAQ Delete error: {e}")
+            print(f"❌ FAQ Delete error: {e}")
             return False
 
     async def delete_document(self, document_id: str) -> int:
         """Delete all embeddings for a document"""
         try:
+            self._check_initialized()
+
             if not self.collection:
                 raise Exception("Collection not initialized")
 
             expr = f'document_id == "{document_id}"'
             delete_result = self.collection.delete(expr)
 
-            print(f"Deleted all embeddings for document_id: {document_id}")
+            print(f"✅ Deleted all embeddings for document_id: {document_id}")
             return True
 
         except Exception as e:
-            print(f"Document Delete error: {e}")
+            print(f"❌ Document Delete error: {e}")
             return False
 
     async def search_similar(self, query_vector: List[float], limit: int = 10, min_score: float = 0.0) -> List[Dict]:
         """Search for similar embeddings"""
         try:
+            self._check_initialized()
+
             if not self.collection:
                 raise Exception("Collection not initialized")
+
+            # Ensure collection is loaded before search
+            self.collection.load()
 
             if len(query_vector) != self.embedding_dim:
                 raise Exception(f"Query vector dimension mismatch: {len(query_vector)} != {self.embedding_dim}")
@@ -303,15 +363,20 @@ class MilvusManager:
             return similar_docs
 
         except Exception as e:
-            print(f"Search error: {e}")
+            print(f"❌ Search error: {e}")
             return []
 
     async def search_similar_faq(self, query_vector: List[float], limit: int = 10, min_score: float = 0.0) -> List[
         Dict]:
         """Search for similar FAQ questions"""
         try:
+            self._check_initialized()
+
             if not self.faq_collection:
                 raise Exception("FAQ Collection not initialized")
+
+            # Ensure collection is loaded before search
+            self.faq_collection.load()
 
             if len(query_vector) != self.embedding_dim:
                 raise Exception(f"Query vector dimension mismatch: {len(query_vector)} != {self.embedding_dim}")
@@ -343,13 +408,13 @@ class MilvusManager:
             return similar_faqs
 
         except Exception as e:
-            print(f"FAQ Search error: {e}")
+            print(f"❌ FAQ Search error: {e}")
             return []
 
     async def get_collection_stats(self) -> Dict[str, Any]:
         """Get collection statistics"""
         try:
-            stats = {}
+            stats = {"initialized": self.is_initialized}
 
             if self.collection:
                 self.collection.load()
@@ -366,12 +431,14 @@ class MilvusManager:
             return stats
 
         except Exception as e:
-            print(f"Stats error: {e}")
-            return {}
+            print(f"❌ Stats error: {e}")
+            return {"error": str(e)}
 
     async def health_check(self) -> bool:
         """Check Milvus connection health"""
         try:
+            if not self.is_initialized:
+                return False
             connections.get_connection_addr("default")
             return True
         except:
@@ -389,16 +456,48 @@ class MilvusManager:
         }
 
 
+    async def rebuild_index(self):
+        """Rebuild index for collection"""
+        try:
+            if not self.collection:
+                raise Exception("Collection not initialized")
+
+            # Release collection first
+            self.collection.release()
+
+            # Drop existing index
+            self.collection.drop_index()
+
+            # Create new index
+            index_params = {
+                "metric_type": "COSINE",
+                "index_type": "IVF_FLAT",
+                "params": {"nlist": 1024}
+            }
+
+            self.collection.create_index(
+                field_name="description_vector",
+                index_params=index_params
+            )
+
+            # Load collection
+            self.collection.load()
+
+            print(f"Index rebuilt and collection loaded successfully")
+            print(f"Total entities: {self.collection.num_entities}")
+
+        except Exception as e:
+            print(f"Rebuild index error: {e}")
+            raise e
 async def main():
-    # Khởi tạo MilvusManager
+    # Initialize MilvusManager
     milvus = MilvusManager(
         host="localhost",
         port="19530",
     )
 
-    # Kết nối & tạo collection
+    # Connect & create collection
     await milvus.initialize()
-
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# RAG_Core/agents/faq_agent.py (OPTIMIZED VERSION)
+# RAG_Core/agents/faq_agent.py (DIRECT ANSWER VERSION)
 
 from typing import Dict, Any, List
 from models.llm_model import llm_model
@@ -14,16 +14,17 @@ class FAQAgent:
         self.name = "FAQ"
 
         # Ngưỡng cho các giai đoạn khác nhau
-        self.vector_threshold = 0.5  # Ngưỡng thấp hơn cho vector search (cast net wide)
+        self.vector_threshold = 0.5  # Ngưỡng thấp hơn cho vector search
         self.rerank_threshold = 0.6  # Ngưỡng cao hơn cho reranked results
 
-        # Prompt cho câu hỏi thông thường
-        self.standard_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp - chuyên gia trả lời các câu hỏi thường gặp và hỗ trợ khách hàng.
+        # Ngưỡng để trả lời trực tiếp (không cần LLM)
+        self.direct_answer_threshold = 0.6  # Rất chắc chắn -> trả lời luôn
 
-Nhiệm vụ: 
-1. Chào hỏi thân thiện khi khách hàng bắt đầu cuộc trò chuyện
-2. Tìm kiếm và trả lời câu hỏi từ cơ sở dữ liệu FAQ
-3. Hướng dẫn khách hàng nếu cần hỗ trợ thêm
+        # Có sử dụng LLM hay không (có thể tắt hoàn toàn)
+        self.use_llm = True  # Set False để LUÔN trả lời trực tiếp
+
+        # Prompt cho câu hỏi thông thường (chỉ dùng khi score thấp hơn)
+        self.standard_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp.
 
 Câu hỏi người dùng: "{question}"
 
@@ -39,26 +40,6 @@ Hướng dẫn:
 
 Trả lời:"""
 
-        # Prompt cho follow-up question
-        self.followup_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp - chuyên gia trả lời các câu hỏi thường gặp.
-
-⚠️ ĐÂY LÀ CÂU HỎI FOLLOW-UP (khách hàng hỏi tiếp về chủ đề đang thảo luận)
-
-Ngữ cảnh: {context}
-
-Câu hỏi follow-up: "{question}"
-
-Kết quả tìm kiếm FAQ (đã được rerank):
-{faq_results}
-
-Hướng dẫn đặc biệt cho follow-up:
-1. Nhận biết đây là câu hỏi tiếp theo, không phải câu hỏi mới
-2. Sử dụng FAQ có rerank_score > {rerank_threshold}
-3. Nếu không tìm thấy FAQ phù hợp, trả về "NOT_FOUND"
-4. Có thể kết hợp thông tin từ ngữ cảnh trước và FAQ mới
-
-Trả lời:"""
-
     def process(
             self,
             question: str,
@@ -66,9 +47,9 @@ Trả lời:"""
             context: str = "",
             **kwargs
     ) -> Dict[str, Any]:
-        """Xử lý câu hỏi FAQ với reranking 2 tầng"""
+        """Xử lý câu hỏi FAQ với khả năng trả lời trực tiếp"""
         try:
-            # BƯỚC 1: Vector search với threshold thấp (cast wide net)
+            # BƯỚC 1: Vector search
             logger.info(f"Step 1: Vector search for FAQ with threshold={self.vector_threshold}")
             faq_results = search_faq.invoke({"query": question})
 
@@ -119,53 +100,74 @@ Trả lời:"""
                     f"Best rerank score ({rerank_score:.3f}) too low"
                 )
 
-            # BƯỚC 4: Format FAQ results cho LLM
-            faq_text = self._format_reranked_faq(reranked_faqs[:3])  # Top 3
+            # BƯỚC 4: Quyết định trả lời trực tiếp hay dùng LLM
 
-            # BƯỚC 5: Chọn prompt phù hợp
-            if is_followup and context:
-                prompt = self.followup_prompt.format(
-                    question=question,
-                    context=context,
-                    faq_results=faq_text,
-                    rerank_threshold=self.rerank_threshold
+            # TH1: Điểm số rất cao hoặc tắt LLM -> TRẢ LỜI TRỰC TIẾP
+            if not self.use_llm or rerank_score >= self.direct_answer_threshold:
+                logger.info(
+                    f"✅ DIRECT ANSWER: rerank={rerank_score:.3f} "
+                    f"(threshold={self.direct_answer_threshold})"
                 )
-                logger.info("Using follow-up FAQ prompt with reranking")
+
+                answer = self._format_direct_answer(best_faq, question)
+
+                return {
+                    "status": "SUCCESS",
+                    "answer": answer,
+                    "mode": "direct",  # Đánh dấu là trả lời trực tiếp
+                    "references": [
+                        {
+                            "document_id": best_faq.get("faq_id"),
+                            "type": "FAQ",
+                            "rerank_score": round(rerank_score, 4),
+                            "similarity_score": round(similarity_score, 4)
+                        }
+                    ],
+                    "next_agent": "end"
+                }
+
+            # TH2: Điểm số trung bình -> DÙNG LLM ĐỂ LÀM MỊN
             else:
+                logger.info(
+                    f"🤖 LLM MODE: rerank={rerank_score:.3f} "
+                    f"(below direct threshold {self.direct_answer_threshold})"
+                )
+
+                faq_text = self._format_reranked_faq(reranked_faqs[:3])
+
                 prompt = self.standard_prompt.format(
                     question=question,
                     faq_results=faq_text,
                     rerank_threshold=self.rerank_threshold
                 )
-                logger.info("Using standard FAQ prompt with reranking")
 
-            # BƯỚC 6: Tạo câu trả lời
-            response = llm_model.invoke(prompt)
+                response = llm_model.invoke(prompt)
 
-            # Validate response
-            if "NOT_FOUND" in response.upper():
-                logger.info("LLM determined FAQ not sufficient")
-                return self._route_to_retriever("LLM rejected FAQ")
+                # Validate response
+                if "NOT_FOUND" in response.upper():
+                    logger.info("LLM determined FAQ not sufficient")
+                    return self._route_to_retriever("LLM rejected FAQ")
 
-            if not response or len(response.strip()) < 10:
-                logger.warning("Generated answer too short")
-                return self._route_to_retriever("Answer too short")
+                if not response or len(response.strip()) < 10:
+                    logger.warning("Generated answer too short")
+                    return self._route_to_retriever("Answer too short")
 
-            logger.info(f"FAQ answer generated successfully (rerank={rerank_score:.3f})")
+                logger.info(f"FAQ answer generated via LLM (rerank={rerank_score:.3f})")
 
-            return {
-                "status": "SUCCESS",
-                "answer": response,
-                "references": [
-                    {
-                        "document_id": best_faq.get("faq_id"),
-                        "type": "FAQ",
-                        "rerank_score": round(rerank_score, 4),
-                        "similarity_score": round(similarity_score, 4)
-                    }
-                ],
-                "next_agent": "end"
-            }
+                return {
+                    "status": "SUCCESS",
+                    "answer": response,
+                    "mode": "llm",  # Đánh dấu là qua LLM
+                    "references": [
+                        {
+                            "document_id": best_faq.get("faq_id"),
+                            "type": "FAQ",
+                            "rerank_score": round(rerank_score, 4),
+                            "similarity_score": round(similarity_score, 4)
+                        }
+                    ],
+                    "next_agent": "end"
+                }
 
         except Exception as e:
             logger.error(f"Error in FAQ agent: {e}", exc_info=True)
@@ -176,8 +178,24 @@ Trả lời:"""
                 "next_agent": "RETRIEVER"
             }
 
+    def _format_direct_answer(self, faq: Dict[str, Any], question: str) -> str:
+        """
+        Format câu trả lời trực tiếp từ FAQ (không qua LLM)
+        Có thể custom thêm greeting, format đẹp hơn
+        """
+        answer = faq.get('answer', '')
+
+        # Option 1: Trả lời ngắn gọn (chỉ answer)
+        # return answer
+
+        # Option 2: Thêm chút context (recommended)
+        return f"{answer}"
+
+        # Option 3: Format chi tiết hơn
+        # return f"Dựa vào thông tin từ FAQ:\n\n{answer}\n\nNếu bạn cần thêm thông tin, vui lòng hỏi thêm nhé!"
+
     def _format_reranked_faq(self, faq_results: List[Dict[str, Any]]) -> str:
-        """Format FAQ đã được rerank với điểm số"""
+        """Format FAQ đã được rerank với điểm số (cho LLM)"""
         if not faq_results:
             return "Không tìm thấy FAQ phù hợp"
 
@@ -206,8 +224,14 @@ Trả lời:"""
             "next_agent": "RETRIEVER"
         }
 
-    def set_thresholds(self, vector_threshold: float = None, rerank_threshold: float = None):
-        """Điều chỉnh ngưỡng động (optional)"""
+    def set_thresholds(
+            self,
+            vector_threshold: float = None,
+            rerank_threshold: float = None,
+            direct_answer_threshold: float = None,
+            use_llm: bool = None
+    ):
+        """Điều chỉnh ngưỡng động"""
         if vector_threshold is not None:
             self.vector_threshold = vector_threshold
             logger.info(f"Vector threshold updated to {vector_threshold}")
@@ -215,3 +239,11 @@ Trả lời:"""
         if rerank_threshold is not None:
             self.rerank_threshold = rerank_threshold
             logger.info(f"Rerank threshold updated to {rerank_threshold}")
+
+        if direct_answer_threshold is not None:
+            self.direct_answer_threshold = direct_answer_threshold
+            logger.info(f"Direct answer threshold updated to {direct_answer_threshold}")
+
+        if use_llm is not None:
+            self.use_llm = use_llm
+            logger.info(f"Use LLM mode: {use_llm}")

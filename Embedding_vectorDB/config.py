@@ -10,7 +10,7 @@ class Config:
 
     # ===== Embedding =====
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "keepitreal/vietnamese-sbert")
-    # THAY ĐỔI: 1024 -> 768 dimensions
+    # chấp nhận cả EMBEDDING_DIM (mới) lẫn EMBEDDING_DIMENSION (cũ)
     EMBEDDING_DIMENSION: int = int(
         os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSION", "768"))
     )

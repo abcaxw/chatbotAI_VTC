@@ -10,7 +10,7 @@ class EmbeddingService:
         Initialize Vietnamese embedding model
         THAY ĐỔI: Embedding dimension = 768
         """
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cpu"
         print(f"Loading embedding model on {self.device}")
 
         self.model = SentenceTransformer(model_name)
@@ -32,14 +32,6 @@ class EmbeddingService:
             with torch.no_grad():
                 embedding = self.model.encode(text, convert_to_tensor=True)
                 embedding = embedding.cpu().numpy()
-
-            # Ensure correct dimension
-            if len(embedding) != self.embedding_dim:
-                # Pad or truncate to match expected dimension
-                if len(embedding) < self.embedding_dim:
-                    embedding = np.pad(embedding, (0, self.embedding_dim - len(embedding)))
-                else:
-                    embedding = embedding[:self.embedding_dim]
 
             return embedding.tolist()
 
