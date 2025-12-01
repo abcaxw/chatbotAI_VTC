@@ -3,7 +3,7 @@ import os
 
 class Config:
     # ===== Milvus =====
-    MILVUS_HOST: str = os.getenv("MILVUS_HOST", "103.252.0.129")
+    MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
     MILVUS_PORT: int = int(os.getenv("MILVUS_PORT", "19530"))
     MILVUS_COLLECTION: str = os.getenv("MILVUS_COLLECTION", "document_embeddings")
     FAQ_COLLECTION: str = os.getenv("FAQ_COLLECTION", "faq_embeddings")
