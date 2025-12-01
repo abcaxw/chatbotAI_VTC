@@ -18,7 +18,7 @@ class FAQAgent:
         self.rerank_threshold = 0.6  # Ngưỡng cao hơn cho reranked results
 
         # Ngưỡng để trả lời trực tiếp (không cần LLM)
-        self.direct_answer_threshold = 0.6  # Rất chắc chắn -> trả lời luôn
+        self.direct_answer_threshold = 0.75  # Rất chắc chắn -> trả lời luôn
 
         # Có sử dụng LLM hay không (có thể tắt hoàn toàn)
         self.use_llm = True  # Set False để LUÔN trả lời trực tiếp
