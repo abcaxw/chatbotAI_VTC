@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Bonus settings
     FAQ_CONSISTENCY_BONUS: float = 1.1  # Bonus multiplier khi tất cả variants đều cao
-    FAQ_CONSISTENCY_THRESHOLD: float = 0.6  # Ngưỡng để được bonus
+    FAQ_CONSISTENCY_THRESHOLD: float = 0.75  # Ngưỡng để được bonus
 
     # ===== Document Grader Settings =====
     DOCUMENT_RERANK_THRESHOLD: float = 0.6  # Rerank threshold cho documents
