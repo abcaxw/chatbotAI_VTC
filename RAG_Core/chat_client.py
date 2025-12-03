@@ -12,7 +12,7 @@ import time
 
 
 class RAGChatClient:
-    def __init__(self, base_url: str = "http://localhost:8501"):
+    def __init__(self, base_url: str = "http://124.158.6.101:8501"):
         self.base_url = base_url
         self.session = requests.Session()
         self.chat_history = []
