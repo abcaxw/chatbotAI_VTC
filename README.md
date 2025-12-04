@@ -17,7 +17,7 @@ Hệ thống chatbot RAG (Retrieval-Augmented Generation) sử dụng kiến tr�
 
 ### Tech Stack
 - **Vector Database**: Milvus
-- **Embedding Model**: keepitreal/vietnamese-sbert (1024D)
+- **Embedding Model**: keepitreal/vietnamese-sbert (768D)
 - **LLM**: GPT-OSS-20B via Ollama
 - **Framework**: LangGraph + FastAPI
 - **Language**: Python 3.11+
