@@ -71,7 +71,7 @@ Lịch sử: "React và Vue đều là framework frontend phổ biến"
 Câu hỏi: "Thế còn Angular?"
 → Câu hỏi làm rõ: "Angular là framework frontend như thế nào so với React và Vue?"
 
-Ví dụ 4:
+Ví dụ 4:`
 Lịch sử: [Không có]
 Câu hỏi: "Giá iPhone 15 bao nhiêu?"
 → Câu hỏi làm rõ: "Giá iPhone 15 bao nhiêu?"

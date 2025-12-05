@@ -136,7 +136,7 @@ class RAGWorkflow:
         # Collect results with timeout handling
         supervisor_result = self._get_result_with_timeout(
             future_supervisor,
-            timeout=8,  # Tăng timeout cho SupervisorAgent (có LLM + context processing)
+            timeout=20,  # Tăng timeout cho SupervisorAgent (có LLM + context processing)
             default={
                 "agent": "FAQ",  # Safe fallback
                 "contextualized_question": question,
