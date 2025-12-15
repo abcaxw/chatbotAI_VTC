@@ -1,4 +1,4 @@
-# RAG_Core/agents/faq_agent.py (DIRECT ANSWER VERSION)
+# RAG_Core/agents/faq_agent.py (NO FALLBACK VERSION)
 
 from typing import Dict, Any, List
 from models.llm_model import llm_model
@@ -14,19 +14,12 @@ class FAQAgent:
         self.name = "FAQ"
 
         # Ngưỡng cho các giai đoạn khác nhau
-        self.vector_threshold = 0.5  # Ngưỡng thấp hơn cho vector search
-        self.rerank_threshold = 0.6  # Ngưỡng cao hơn cho reranked results
-
-        # Ngưỡng để trả lời trực tiếp (không cần LLM)
-        self.direct_answer_threshold = 0.75  # Rất chắc chắn -> trả lời luôn
-
-        # Nếu similarity rất cao -> auto pass + direct answer
+        self.vector_threshold = 0.5
+        self.rerank_threshold = 0.6
+        self.direct_answer_threshold = 0.75
         self.force_similarity_threshold = 0.95
-
-        # Có sử dụng LLM hay không
         self.use_llm = True
 
-        # Prompt cho câu hỏi thông thường
         self.standard_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp.
 
 Câu hỏi người dùng: "{question}"
@@ -44,13 +37,16 @@ Hướng dẫn:
 Trả lời:"""
 
     def process(
-        self,
-        question: str,
-        is_followup: bool = False,
-        context: str = "",
-        **kwargs
+            self,
+            question: str,
+            is_followup: bool = False,
+            context: str = "",
+            **kwargs
     ) -> Dict[str, Any]:
-        """Xử lý câu hỏi FAQ với khả năng trả lời trực tiếp"""
+        """
+        Xử lý câu hỏi FAQ - KHÔNG CÓ FALLBACK
+        Nếu reranking fail → propagate error
+        """
         try:
             # ===============================================
             # BƯỚC 1: VECTOR SEARCH
@@ -75,17 +71,18 @@ Trả lời:"""
             logger.info(f"Found {len(filtered_faqs)} FAQs above vector threshold")
 
             # ===============================================
-            # BƯỚC 2: RERANK
+            # BƯỚC 2: RERANK (NO FALLBACK)
             # ===============================================
             logger.info("Step 2: Reranking FAQs with cross-encoder")
+
             reranked_faqs = rerank_faq.invoke({
                 "query": question,
                 "faq_results": filtered_faqs
             })
 
             if not reranked_faqs:
-                logger.warning("Reranking returned empty results")
-                return self._route_to_retriever("Reranking failed")
+                logger.error("❌ Reranking returned empty results - should not happen")
+                raise RuntimeError("FAQ reranking failed: empty results")
 
             best_faq = reranked_faqs[0]
             rerank_score = best_faq.get("rerank_score", 0)
@@ -96,15 +93,11 @@ Trả lời:"""
             )
 
             # ===============================================
-            # BƯỚC 3: CHECK THRESHOLD VỚI LOGIC MỚI
+            # BƯỚC 3: CHECK THRESHOLD
             # ===============================================
-
-            # Pass nếu:
-            # 1. rerank >= 0.6
-            # 2. HOẶC similarity >= 0.95
             is_confident = (
-                rerank_score >= self.rerank_threshold
-                or similarity_score >= self.force_similarity_threshold
+                    rerank_score >= self.rerank_threshold
+                    or similarity_score >= self.force_similarity_threshold
             )
 
             if not is_confident:
@@ -118,14 +111,11 @@ Trả lời:"""
 
             # ===============================================
             # BƯỚC 4: TRẢ LỜI TRỰC TIẾP HAY QUA LLM
-            # Direct answer nếu:
-            # 1. rerank >= 0.75
-            # 2. HOẶC similarity >= 0.95
             # ===============================================
             if (
-                not self.use_llm
-                or rerank_score >= self.direct_answer_threshold
-                or similarity_score >= self.force_similarity_threshold
+                    not self.use_llm
+                    or rerank_score >= self.direct_answer_threshold
+                    or similarity_score >= self.force_similarity_threshold
             ):
                 logger.info(
                     f"✅ DIRECT ANSWER: rerank={rerank_score:.3f}, sim={similarity_score:.3f}"
@@ -190,14 +180,15 @@ Trả lời:"""
                 "next_agent": "end"
             }
 
+        except RuntimeError as e:
+            # Critical errors (reranking fails) - propagate
+            logger.error(f"❌ Critical FAQ error: {e}")
+            raise
+
         except Exception as e:
-            logger.error(f"Error in FAQ agent: {e}", exc_info=True)
-            return {
-                "status": "ERROR",
-                "answer": f"Lỗi xử lý FAQ: {str(e)}",
-                "references": [],
-                "next_agent": "RETRIEVER"
-            }
+            # Other errors - also propagate
+            logger.error(f"❌ Unexpected error in FAQ agent: {e}", exc_info=True)
+            raise RuntimeError(f"FAQ agent failed: {e}") from e
 
     # ===============================================================
     # Helper Functions
@@ -237,11 +228,11 @@ Trả lời:"""
         }
 
     def set_thresholds(
-        self,
-        vector_threshold: float = None,
-        rerank_threshold: float = None,
-        direct_answer_threshold: float = None,
-        use_llm: bool = None
+            self,
+            vector_threshold: float = None,
+            rerank_threshold: float = None,
+            direct_answer_threshold: float = None,
+            use_llm: bool = None
     ):
         if vector_threshold is not None:
             self.vector_threshold = vector_threshold

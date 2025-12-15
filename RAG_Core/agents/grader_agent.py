@@ -1,4 +1,5 @@
-# agents/grader_agent.py
+# RAG_Core/agents/grader_agent.py (NO FALLBACK VERSION)
+
 from typing import Dict, Any, List
 from tools.vector_search import rerank_documents
 from config.settings import settings
@@ -10,11 +11,13 @@ logger = logging.getLogger(__name__)
 class GraderAgent:
     def __init__(self):
         self.name = "GRADER"
-        # Ngưỡng cho reranking score (thường cao hơn similarity)
-        self.reranking_threshold = 0.6  # Cross-encoder score thường thấp hơn
+        self.reranking_threshold = 0.6
 
     def process(self, question: str, documents: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
-        """Đánh giá chất lượng tài liệu bằng reranking model"""
+        """
+        Đánh giá chất lượng tài liệu bằng reranking model
+        KHÔNG CÓ FALLBACK - nếu rerank fail → raise error
+        """
         try:
             if not documents:
                 logger.warning("No documents to grade")
@@ -25,16 +28,17 @@ class GraderAgent:
                     "next_agent": "NOT_ENOUGH_INFO"
                 }
 
-            # Bước 1: Rerank documents
+            # Bước 1: Rerank documents (NO FALLBACK)
             logger.info(f"Reranking {len(documents)} documents for question: {question[:50]}...")
+
             reranked_docs = rerank_documents.invoke({
                 "query": question,
                 "documents": documents
             })
 
-            if not reranked_docs or "error" in str(reranked_docs):
-                logger.error("Reranking failed, using fallback grading")
-                return self._fallback_grading(documents)
+            if not reranked_docs:
+                logger.error("❌ Reranking returned empty results - this should not happen")
+                raise RuntimeError("Reranking failed: empty results")
 
             # Bước 2: Lọc documents theo 2 tiêu chí
             qualified_docs = []
@@ -82,45 +86,12 @@ class GraderAgent:
                     "next_agent": "NOT_ENOUGH_INFO"
                 }
 
+        except RuntimeError as e:
+            # Reranking errors - propagate up
+            logger.error(f"❌ Critical error in grader agent: {e}")
+            raise
+
         except Exception as e:
-            logger.error(f"Error in grader agent: {e}", exc_info=True)
-            return {
-                "status": "ERROR",
-                "qualified_documents": [],
-                "references": [],
-                "next_agent": "NOT_ENOUGH_INFO"
-            }
-
-    def _fallback_grading(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Phương pháp dự phòng khi reranking thất bại.
-        Chỉ dùng similarity score từ vector search.
-        """
-        logger.info("Using fallback grading with similarity scores only")
-
-        qualified_docs = [
-            doc for doc in documents
-            if doc.get("similarity_score", 0) >= settings.SIMILARITY_THRESHOLD
-        ]
-
-        if qualified_docs:
-            return {
-                "status": "SUFFICIENT",
-                "qualified_documents": qualified_docs,
-                "references": [
-                    {
-                        "document_id": doc.get("document_id"),
-                        "type": "DOCUMENT",
-                        "similarity_score": round(doc.get("similarity_score", 0), 4)
-                    }
-                    for doc in qualified_docs
-                ],
-                "next_agent": "GENERATOR"
-            }
-        else:
-            return {
-                "status": "INSUFFICIENT",
-                "qualified_documents": [],
-                "references": [],
-                "next_agent": "NOT_ENOUGH_INFO"
-            }
+            # Other errors - also propagate
+            logger.error(f"❌ Unexpected error in grader agent: {e}", exc_info=True)
+            raise RuntimeError(f"Grader agent failed: {e}") from e

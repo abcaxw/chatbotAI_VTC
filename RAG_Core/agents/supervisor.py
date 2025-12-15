@@ -22,7 +22,11 @@ Nhiệm vụ:
 2. Phân loại câu hỏi và chọn agent phù hợp để xử lý.
 
 Các agent có thể chọn:
-- FAQ: Chào hỏi thân thiện, câu hỏi thường gặp, hoặc các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân.
+- FAQ: Dùng cho chào hỏi thân thiện, câu hỏi thường gặp, hoặc các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân. Bao gồm:
+  - An toàn thông tin: bảo vệ dữ liệu cá nhân, nhận diện lừa đảo, bảo mật tài khoản.
+  - Thông tin và kiến thức về AI: cách dùng AI cơ bản, rủi ro khi sử dụng AI, ứng dụng AI phục vụ học tập và công việc.
+  - Tin học văn phòng: Word, Excel, PowerPoint, email, quản lý file.
+  - Kiến thức công nghệ thông tin cơ bản: thao tác thiết bị, kết nối Internet, sử dụng ứng dụng số trong đời sống.
 - OTHER: Câu hỏi hoặc yêu cầu nằm ngoài phạm vi chuyển đổi số.
 - CHATTER: Người dùng có dấu hiệu không hài lòng, giận dữ, hoặc cần được an ủi, làm dịu.
 - REPORTER: Khi người dùng phản ánh lỗi, mất kết nối, hoặc vấn đề kỹ thuật của hệ thống.
