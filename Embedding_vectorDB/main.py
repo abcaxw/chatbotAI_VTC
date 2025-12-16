@@ -363,10 +363,6 @@ async def add_faq(request: dict):
             raise HTTPException(status_code=400, detail="Question is required")
         if not answer:
             raise HTTPException(status_code=400, detail="Answer is required")
-        if len(question) < 3:
-            raise HTTPException(status_code=400, detail="Question must be at least 3 characters long")
-        if len(answer) < 3:
-            raise HTTPException(status_code=400, detail="Answer must be at least 3 characters long")
 
         # Generate FAQ ID if not provided
         if not faq_id:
