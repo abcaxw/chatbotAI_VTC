@@ -256,7 +256,7 @@ class DXGovCrawlerWithEmbedding:
             }
 
             response = requests.post(
-                f"http://124.158.6.101:8000/api/v1/embed-markdown",
+                f"http://localhost:8000/api/v1/embed-markdown",
                 json=payload,
                 headers={'Content-Type': 'application/json'},
                 timeout=120
@@ -288,7 +288,7 @@ class DXGovCrawlerWithEmbedding:
             print(f"   🗑️  Đang xóa embeddings cho document: {document_id}")
 
             response = requests.delete(
-                f"http://124.158.6.101:8000/api/v1/document/delete/{document_id}",
+                f"http://localhost:8000/api/v1/document/delete/{document_id}",
                 timeout=30
             )
 
