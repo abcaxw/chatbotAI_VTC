@@ -17,7 +17,7 @@ class FAQAgent:
         self.vector_threshold = 0.5
         self.rerank_threshold = 0.6
         self.direct_answer_threshold = 0.75
-        self.force_similarity_threshold = 0.95
+        self.force_similarity_threshold = 0.85
         self.use_llm = True
 
         self.standard_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp.
@@ -96,8 +96,7 @@ Trả lời:"""
             # BƯỚC 3: CHECK THRESHOLD
             # ===============================================
             is_confident = (
-                    rerank_score >= self.rerank_threshold
-                    or similarity_score >= self.force_similarity_threshold
+                similarity_score >= self.force_similarity_threshold
             )
 
             if not is_confident:
@@ -113,8 +112,7 @@ Trả lời:"""
             # BƯỚC 4: TRẢ LỜI TRỰC TIẾP HAY QUA LLM
             # ===============================================
             if (
-                    not self.use_llm
-                    or rerank_score >= self.direct_answer_threshold
+                    rerank_score >= self.direct_answer_threshold
                     or similarity_score >= self.force_similarity_threshold
             ):
                 logger.info(
@@ -131,6 +129,7 @@ Trả lời:"""
                         {
                             "document_id": best_faq.get("faq_id"),
                             "type": "FAQ",
+                            "description": best_faq.get("question", "")[:500],  # Thêm description
                             "rerank_score": round(rerank_score, 4),
                             "similarity_score": round(similarity_score, 4)
                         }
@@ -173,6 +172,7 @@ Trả lời:"""
                     {
                         "document_id": best_faq.get("faq_id"),
                         "type": "FAQ",
+                        "description": best_faq.get("question", "")[:500],
                         "rerank_score": round(rerank_score, 4),
                         "similarity_score": round(similarity_score, 4)
                     }

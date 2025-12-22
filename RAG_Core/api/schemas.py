@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
 class DocumentReference(BaseModel):
     document_id: str
     type: str  # FAQ, DOCUMENT, SUPPORT, SYSTEM
+    description: Optional[str] = None  # Thêm trường description
 
 
 class ChatResponse(BaseModel):

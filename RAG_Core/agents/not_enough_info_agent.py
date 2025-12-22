@@ -15,7 +15,7 @@ TÌNH HUỐNG: Hệ thống không tìm thấy thông tin chính xác trong cơ 
 Câu hỏi người dùng: "{question}"
 
 NHIỆM VỤ CỦA BẠN:
-1. Thừa nhận rằng bạn chưa có thông tin chính thức trong hệ thống
+1. Bạn hãy trả lời với khách hàng "Dựa trên tổng hợp từ các nguồn thông tin, câu trả lời bạn có thể tham khảo như sau":
 2. NHƯNG dựa trên kiến thức chuyên môn của bạn về chuyển đổi số, hãy cung cấp:
    - Câu trả lời hữu ích và mang tính tham khảo
    - Chia sẻ kiến thức chung về chủ đề (nếu có)
@@ -25,7 +25,7 @@ NHIỆM VỤ CỦA BẠN:
 YÊU CẦU:
 - Trả lời bằng tiếng Việt tự nhiên, thân thiện
 - Thể hiện sự chuyên nghiệp nhưng cũng khiêm tốn
-- Luôn làm rõ đây là ý kiến tham khảo, không phải thông tin chính thức
+- Luôn làm rõ đây là ý kiến tham khảo
 
 Số điện thoại hỗ trợ: {support_phone}
 

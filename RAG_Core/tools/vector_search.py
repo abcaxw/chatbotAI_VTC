@@ -1,4 +1,4 @@
-# RAG_Core/tools/vector_search.py (NO FALLBACK VERSION)
+# RAG_Core/tools/vector_search.py (COMPLETE VERSION)
 
 from langchain_core.tools import tool
 from typing import List, Dict, Any
@@ -11,66 +11,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# RERANKING MODEL CONFIGURATION - NO FALLBACK
-# ============================================================================
-
-def load_reranker_model():
-    """
-    Load reranker model - KHÔNG CÓ FALLBACK
-    Nếu model config fail → raise Exception
-    """
-    model_name = getattr(settings, 'RERANKER_MODEL', 'BAAI/bge-reranker-base')
-    max_length = getattr(settings, 'RERANKER_MAX_LENGTH', 512)
-
-    logger.info(f"Loading reranker model: {model_name}")
-    logger.info(f"Max length: {max_length}")
-
-    try:
-        model = CrossEncoder(model_name, max_length=max_length)
-        logger.info(f"✅ Reranker model loaded successfully: {model_name}")
-        return model, model_name
-
-    except Exception as e:
-        error_msg = f"❌ CRITICAL: Failed to load reranker model '{model_name}': {e}"
-        logger.error(error_msg)
-        raise RuntimeError(error_msg) from e
-
-
-# Load model at startup - fail fast if error
+# Load reranking model globally
 try:
-    reranker_model, reranker_model_name = load_reranker_model()
-    logger.info(f"🎯 Active reranker: {reranker_model_name}")
+    reranker_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+    logger.info("Reranker model loaded successfully")
 except Exception as e:
-    logger.critical(f"❌ Cannot start without reranker model: {e}")
+    logger.error(f"Failed to load reranker model: {e}")
     reranker_model = None
-    reranker_model_name = None
-    # Re-raise để stop service nếu trong production mode
-    if getattr(settings, 'FAIL_FAST_ON_MODEL_ERROR', True):
-        raise
 
 
 # ============================================================================
-# FAQ RERANKING - NO FALLBACK
+# FAQ RERANKING (OPTIMIZED)
 # ============================================================================
 
 @tool
 def rerank_faq(query: str, faq_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Rerank FAQ results - KHÔNG CÓ FALLBACK
-    Nếu reranker fail → raise Exception
+    Rerank FAQ results using cross-encoder với chiến lược tối ưu.
     """
-    if not faq_results:
-        logger.warning("No FAQ to rerank")
-        return []
-
-    if reranker_model is None:
-        error_msg = "❌ Reranker model not available - cannot proceed"
-        logger.error(error_msg)
-        raise RuntimeError(error_msg)
-
     try:
+        if not faq_results:
+            logger.warning("No FAQ to rerank")
+            return []
+
+        if reranker_model is None:
+            logger.warning("Reranker model not available, returning original FAQ")
+            return faq_results
+
         # Prepare pairs với nhiều variants
         pairs = []
         faq_variants = []
@@ -86,33 +53,22 @@ def rerank_faq(query: str, faq_results: List[Dict[str, Any]]) -> List[Dict[str, 
             pairs.append([query, question])
             faq_variants.append(('question_only', idx))
 
-            # Variant 2: Query vs Question+Answer (truncate nếu quá dài)
+            # Variant 2: Query vs Question+Answer
             combined = f"{question} {answer}"
-            if len(combined) > 500:
-                combined = combined[:500]
             pairs.append([query, combined])
             faq_variants.append(('question_answer', idx))
 
             # Variant 3: Query vs Answer only
-            if len(answer) > 400:
-                answer = answer[:400]
             pairs.append([query, answer])
             faq_variants.append(('answer_only', idx))
 
         if not pairs:
             logger.warning("No valid FAQ pairs created")
-            return []
+            return faq_results
 
-        # Predict scores với batch processing
-        logger.info(f"Reranking {len(pairs)} FAQ variants using {reranker_model_name}")
-
-        batch_size = getattr(settings, 'RERANKER_BATCH_SIZE', 32)
-        scores = []
-
-        for i in range(0, len(pairs), batch_size):
-            batch = pairs[i:i + batch_size]
-            batch_scores = reranker_model.predict(batch)
-            scores.extend(batch_scores)
+        # Predict scores
+        logger.info(f"Reranking {len(pairs)} FAQ variants ({len(faq_results)} FAQs)")
+        scores = reranker_model.predict(pairs)
 
         # Aggregate scores
         faq_scores = {}
@@ -150,81 +106,63 @@ def rerank_faq(query: str, faq_results: List[Dict[str, Any]]) -> List[Dict[str, 
             faq_copy = faq.copy()
             faq_copy['rerank_score'] = final_score
             faq_copy['rerank_details'] = variant_scores
-            faq_copy['reranker_model'] = reranker_model_name
             reranked_faq.append(faq_copy)
 
         # Sort by final score
         reranked_faq.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
 
-        logger.info(f"✅ Reranked {len(reranked_faq)} FAQs. Best: {reranked_faq[0].get('rerank_score', 0):.3f}")
+        logger.info(f"Reranked {len(reranked_faq)} FAQs. Best: {reranked_faq[0].get('rerank_score', 0):.3f}")
 
         return reranked_faq
 
     except Exception as e:
-        error_msg = f"❌ FAQ reranking failed: {e}"
-        logger.error(error_msg, exc_info=True)
-        raise RuntimeError(error_msg) from e
+        logger.error(f"Error in FAQ reranking: {e}", exc_info=True)
+        return sorted(faq_results, key=lambda x: x.get('similarity_score', 0), reverse=True)
 
 
 # ============================================================================
-# DOCUMENT RERANKING - NO FALLBACK
+# DOCUMENT RERANKING
 # ============================================================================
 
 @tool
 def rerank_documents(query: str, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Rerank documents - KHÔNG CÓ FALLBACK
-    Nếu reranker fail → raise Exception
+    Rerank documents using cross-encoder model.
     """
-    if not documents:
-        logger.warning("No documents to rerank")
-        return []
-
-    if reranker_model is None:
-        error_msg = "❌ Reranker model not available - cannot proceed"
-        logger.error(error_msg)
-        raise RuntimeError(error_msg)
-
     try:
-        # Prepare pairs với text truncation
+        if not documents:
+            logger.warning("No documents to rerank")
+            return []
+
+        if reranker_model is None:
+            logger.warning("Reranker model not available, returning original documents")
+            return documents
+
+        # Prepare pairs
         pairs = []
         for doc in documents:
             doc_text = doc.get('description', '') or doc.get('answer', '') or ''
-
-            # Truncate để model xử lý tốt hơn
-            if len(doc_text) > 500:
-                doc_text = doc_text[:500]
-
             pairs.append([query, doc_text])
 
-        # Batch prediction
-        logger.info(f"Reranking {len(pairs)} documents using {reranker_model_name}")
-        batch_size = getattr(settings, 'RERANKER_BATCH_SIZE', 32)
-
-        scores = []
-        for i in range(0, len(pairs), batch_size):
-            batch = pairs[i:i + batch_size]
-            batch_scores = reranker_model.predict(batch)
-            scores.extend(batch_scores)
+        # Predict scores
+        scores = reranker_model.predict(pairs)
 
         # Add rerank_score
         reranked_docs = []
         for i, doc in enumerate(documents):
             doc_copy = doc.copy()
             doc_copy['rerank_score'] = float(scores[i])
-            doc_copy['reranker_model'] = reranker_model_name
             reranked_docs.append(doc_copy)
 
         # Sort by rerank_score
         reranked_docs.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
 
-        logger.info(f"✅ Reranked {len(reranked_docs)} documents. Best: {reranked_docs[0].get('rerank_score', 0):.3f}")
+        logger.info(f"Reranked {len(reranked_docs)} documents")
         return reranked_docs
 
     except Exception as e:
-        error_msg = f"❌ Document reranking failed: {e}"
-        logger.error(error_msg, exc_info=True)
-        raise RuntimeError(error_msg) from e
+        logger.error(f"Error in reranking: {e}")
+        return documents
 
 
 # ============================================================================
@@ -281,12 +219,14 @@ def search_documents(query: str) -> List[Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"Error in search_documents: {str(e)}")
-        raise
+        return [{"error": f"Lỗi tìm kiếm tài liệu: {str(e)}"}]
 
 
 @tool
 def search_faq(query: str, top_k: int = None) -> List[Dict[str, Any]]:
-    """Tìm kiếm FAQ với top_k cao hơn để reranking có nhiều lựa chọn"""
+    """
+    Tìm kiếm FAQ với top_k cao hơn để reranking có nhiều lựa chọn
+    """
     try:
         if top_k is None:
             top_k = getattr(settings, 'FAQ_TOP_K', 10)
@@ -304,7 +244,7 @@ def search_faq(query: str, top_k: int = None) -> List[Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"Error in search_faq: {str(e)}")
-        raise
+        return [{"error": f"Lỗi tìm kiếm FAQ: {str(e)}"}]
 
 
 # ============================================================================
@@ -319,16 +259,16 @@ def check_database_connection() -> Dict[str, Any]:
 
         result = {
             "connected": is_connected,
-            "message": "Kết nối bình thường" if is_connected else "Mất kết nối cơ sở dữ liệu",
-            "reranker_model": reranker_model_name,
-            "reranker_status": "loaded" if reranker_model else "not_loaded"
+            "message": "Kết nối bình thường" if is_connected else "Mất kết nối cơ sở dữ liệu"
         }
 
         if is_connected:
             try:
+                # Check embedding model dimension
                 test_vector = embedding_model.encode_single("test")
                 embedding_dim = test_vector.shape[0]
 
+                # Check collection dimensions
                 doc_dim = milvus_client._get_collection_dimension(
                     settings.DOCUMENT_COLLECTION, "description_vector"
                 )
@@ -372,11 +312,6 @@ def diagnose_vector_dimensions() -> Dict[str, Any]:
         diagnosis = {
             "embedding_model": {},
             "collections": {},
-            "reranker_info": {
-                "model_name": reranker_model_name,
-                "status": "loaded" if reranker_model else "FAILED",
-                "fail_fast_mode": getattr(settings, 'FAIL_FAST_ON_MODEL_ERROR', True)
-            },
             "recommendations": []
         }
 

@@ -22,7 +22,8 @@ Nhiệm vụ:
 2. Phân loại câu hỏi và chọn agent phù hợp để xử lý.
 
 Các agent có thể chọn:
-- FAQ: Dùng cho chào hỏi thân thiện, câu hỏi thường gặp, hoặc các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân. Bao gồm:
+- FAQ: Dùng cho chào hỏi thân thiện, câu hỏi thường gặp, hoặc các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân và doanh nghiệp. Bao gồm:
+  - Tư vấn giải pháp, ứng dụng chuyển đổi số cho doanh nghiệp và người dân
   - An toàn thông tin: bảo vệ dữ liệu cá nhân, nhận diện lừa đảo, bảo mật tài khoản.
   - Thông tin và kiến thức về AI: cách dùng AI cơ bản, rủi ro khi sử dụng AI, ứng dụng AI phục vụ học tập và công việc.
   - Tin học văn phòng: Word, Excel, PowerPoint, email, quản lý file.

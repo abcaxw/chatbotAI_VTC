@@ -83,12 +83,13 @@ async def chat(request: ChatRequest):
         # Run the workflow
         result = rag_workflow.run(request.question, request.history)
 
-        # Convert references to proper format
+        # Convert references to proper format with description
         references = []
         for ref in result.get("references", []):
             references.append(DocumentReference(
                 document_id=ref.get("document_id", "unknown"),
-                type=ref.get("type", "DOCUMENT")
+                type=ref.get("type", "DOCUMENT"),
+                description=ref.get("description", None)  # Thêm description
             ))
 
         logger.info(f"Response generated with {len(references)} references")
