@@ -1,8 +1,8 @@
-# 🤖 RAG Multi-Agent Chatbot System
+# RAG Multi-Agent Chatbot System
 
 Hệ thống chatbot RAG (Retrieval-Augmented Generation) sử dụng kiến trúc multi-agent với LangGraph, chạy hoàn toàn local trên GPU với model GPT-OSS-20B và Vietnamese-SBERT embeddings.
 
-## 🏗️ Kiến trúc hệ thống
+## Kiến trúc hệ thống
 
 ### Multi-Agent Architecture
 - **SUPERVISOR**: Điều phối chính, phân loại yêu cầu
@@ -22,7 +22,7 @@ Hệ thống chatbot RAG (Retrieval-Augmented Generation) sử dụng kiến tr�
 - **Framework**: LangGraph + FastAPI
 - **Language**: Python 3.11+
 
-## 📁 Cấu trúc dự án
+## Cấu trúc dự án
 
 ```
 Embedding_vectorDB/
@@ -61,7 +61,7 @@ RAG_Core/
 └── main.py               # Entry point
 ```
 
-## 🚀 Hướng dẫn cài đặt và chạy
+## Hướng dẫn cài đặt và chạy
 
 ### Yêu cầu hệ thống
 - Python 3.11+
@@ -149,7 +149,7 @@ curl -X POST "http://localhost:8501/chat" \
      }'
 ```
 
-## 📝 Configuration
+## Configuration
 
 ### Điều chỉnh Agent Behavior
 
