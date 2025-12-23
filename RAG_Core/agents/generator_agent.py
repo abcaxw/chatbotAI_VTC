@@ -1,4 +1,4 @@
-# RAG_Core/agents/generator_agent.py - STREAMING VERSION
+# RAG_Core/agents/generator_agent.py - FIXED STREAMING VERSION
 
 from typing import Dict, Any, List, AsyncIterator
 from models.llm_model import llm_model
@@ -224,21 +224,22 @@ Hãy trả lời:"""
             **kwargs
     ) -> AsyncIterator[str]:
         """
-        Streaming generation - trả về generator
+        FIXED: Streaming generation with proper async/await
 
-        Usage:
-            async for chunk in generator_agent.process_streaming(...):
-                yield chunk
+        Returns async generator that yields text chunks
         """
         try:
+            logger.info(f"🚀 Generator: Starting streaming for: {question[:50]}...")
+
             if not documents:
-                yield "Không có tài liệu để tạo câu trả lời"
+                yield "Không có tài liệu để tạo câu trả lời."
                 return
 
+            # Format inputs
             doc_text = self._format_documents(documents)
             history_text = self._format_history(history or [], max_turns=2)
 
-            # Chọn prompt
+            # Choose prompt
             if is_followup:
                 if not context_summary:
                     context_summary = self._extract_context_summary(history or [])
@@ -256,12 +257,18 @@ Hãy trả lời:"""
                     documents=doc_text
                 )
 
-            logger.info(f"Starting streaming generation for question: {question[:50]}...")
+            logger.info(f"📝 Generator: Prompt prepared, length={len(prompt)}")
 
-            # Stream từ LLM
+            # CRITICAL: Stream from LLM
+            chunk_count = 0
             async for chunk in llm_model.astream(prompt):
-                yield chunk
+                if chunk:  # Only yield non-empty chunks
+                    chunk_count += 1
+                    logger.debug(f"Generator yielding chunk #{chunk_count}: {chunk[:30]}...")
+                    yield chunk
+
+            logger.info(f"✅ Generator: Completed streaming {chunk_count} chunks")
 
         except Exception as e:
-            logger.error(f"Error in streaming generator: {e}", exc_info=True)
+            logger.error(f"❌ Generator streaming error: {e}", exc_info=True)
             yield f"\n\n[Lỗi: {str(e)}]"
