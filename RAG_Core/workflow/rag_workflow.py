@@ -1,4 +1,4 @@
-# RAG_Core/workflow/rag_workflow.py - COMPLETE STREAMING VERSION
+# RAG_Core/workflow/rag_workflow_true_streaming.py
 
 from typing import Dict, Any, List, AsyncIterator
 from langgraph.graph import StateGraph
@@ -12,10 +12,14 @@ from agents.faq_agent import FAQAgent
 from agents.retriever_agent import RetrieverAgent
 from agents.grader_agent import GraderAgent
 from agents.generator_agent import GeneratorAgent
-from agents.not_enough_info_agent import NotEnoughInfoAgent
-from agents.chatter_agent import ChatterAgent
 from agents.reporter_agent import ReporterAgent
-from agents.other_agent import OtherAgent
+
+# Import streaming agents
+from agents.base_agent import (
+    StreamingChatterAgent,
+    StreamingOtherAgent,
+    StreamingNotEnoughInfoAgent
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +52,12 @@ class RAGWorkflow:
         self.retriever_agent = RetrieverAgent()
         self.grader_agent = GraderAgent()
         self.generator_agent = GeneratorAgent()
-        self.not_enough_info_agent = NotEnoughInfoAgent()
-        self.chatter_agent = ChatterAgent()
         self.reporter_agent = ReporterAgent()
-        self.other_agent = OtherAgent()
+
+        # NEW: Streaming-enabled agents
+        self.chatter_agent = StreamingChatterAgent()
+        self.other_agent = StreamingOtherAgent()
+        self.not_enough_info_agent = StreamingNotEnoughInfoAgent()
 
         self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="RAG-Worker")
         self.workflow = self._create_workflow()
@@ -113,14 +119,21 @@ class RAGWorkflow:
         future_faq = self.executor.submit(self._safe_execute_faq, question, history)
         future_retriever = self.executor.submit(self._safe_execute_retriever, question)
 
-        supervisor_result = self._get_result_with_timeout(future_supervisor, timeout=20,
-                                                          default={"agent": "FAQ", "contextualized_question": question,
-                                                                   "is_followup": False}, name="Supervisor")
-        faq_result = self._get_result_with_timeout(future_faq, timeout=10,
-                                                   default={"status": "ERROR", "answer": "", "references": []},
-                                                   name="FAQ")
-        retriever_result = self._get_result_with_timeout(future_retriever, timeout=10,
-                                                         default={"status": "ERROR", "documents": []}, name="RETRIEVER")
+        supervisor_result = self._get_result_with_timeout(
+            future_supervisor, timeout=20,
+            default={"agent": "FAQ", "contextualized_question": question, "is_followup": False},
+            name="Supervisor"
+        )
+        faq_result = self._get_result_with_timeout(
+            future_faq, timeout=10,
+            default={"status": "ERROR", "answer": "", "references": []},
+            name="FAQ"
+        )
+        retriever_result = self._get_result_with_timeout(
+            future_retriever, timeout=10,
+            default={"status": "ERROR", "documents": []},
+            name="RETRIEVER"
+        )
 
         state["supervisor_classification"] = supervisor_result
         state["question"] = supervisor_result.get("contextualized_question", question)
@@ -144,8 +157,7 @@ class RAGWorkflow:
 
     def _safe_execute_supervisor(self, question: str, history: List) -> Dict[str, Any]:
         try:
-            result = self.supervisor.classify_request(question, history)
-            return result
+            return self.supervisor.classify_request(question, history)
         except Exception as e:
             logger.error(f"❌ Supervisor error: {e}")
             return self._fallback_supervisor_classification(question)
@@ -307,7 +319,7 @@ class RAGWorkflow:
         return state.get("current_agent", "end")
 
     def run(self, question: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
-        """Non-streaming run (original)"""
+        """Non-streaming run"""
         try:
             initial_state = self._create_initial_state(question, history)
             logger.info(f"🚀 Workflow start: {question[:100]}")
@@ -331,7 +343,9 @@ class RAGWorkflow:
             question: str,
             history: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """Run workflow với streaming - FIXED"""
+        """
+        ✅ TRUE STREAMING cho tất cả agents
+        """
         try:
             logger.info(f"🚀 Streaming workflow start: {question[:100]}")
 
@@ -343,27 +357,33 @@ class RAGWorkflow:
             current_agent = state.get("current_agent")
             logger.info(f"📍 Routed to: {current_agent}")
 
-            # Direct answer from FAQ/special agents
+            # ================================================================
+            # FAQ - Direct answer (fake stream vì answer đã sẵn)
+            # ================================================================
             if current_agent == "end":
                 answer_text = state.get("answer", "")
 
-                async def direct_generator():
+                async def faq_generator():
+                    # FAQ answers are pre-computed, so we fake stream
                     words = answer_text.split()
                     for word in words:
                         yield word + " "
                         await asyncio.sleep(0.01)
 
                 return {
-                    "answer_stream": direct_generator(),
+                    "answer_stream": faq_generator(),
                     "references": state.get("references", []),
                     "status": state.get("status", "SUCCESS")
                 }
 
-            # Through grader
+            # ================================================================
+            # GRADER → GENERATOR (TRUE STREAMING)
+            # ================================================================
             elif current_agent == "GRADER":
                 state = self._grader_node(state)
 
                 if state.get("current_agent") == "GENERATOR":
+                    logger.info("✅ TRUE STREAMING: GENERATOR")
                     return {
                         "answer_stream": self.generator_agent.process_streaming(
                             question=state["question"],
@@ -377,46 +397,92 @@ class RAGWorkflow:
                         "status": "STREAMING"
                     }
                 else:
-                    state = self._not_enough_info_node(state)
-                    answer_text = state.get("answer", "")
+                    # NOT_ENOUGH_INFO - TRUE STREAMING
+                    logger.info("✅ TRUE STREAMING: NOT_ENOUGH_INFO")
 
-                    async def not_enough_generator():
-                        words = answer_text.split()
-                        for word in words:
-                            yield word + " "
-                            await asyncio.sleep(0.01)
+                    from config.settings import settings
 
                     return {
-                        "answer_stream": not_enough_generator(),
-                        "references": state.get("references", []),
-                        "status": state.get("status", "SUCCESS")
+                        "answer_stream": self.not_enough_info_agent.process_streaming(
+                            question=state["question"],
+                            support_phone=settings.SUPPORT_PHONE
+                        ),
+                        "references": [{"document_id": "llm_knowledge", "type": "GENERAL_KNOWLEDGE"}],
+                        "status": "STREAMING"
                     }
 
-            # Special agents
-            else:
-                if current_agent == "CHATTER":
-                    state = self._chatter_node(state)
-                elif current_agent == "REPORTER":
-                    state = self._reporter_node(state)
-                elif current_agent == "OTHER":
-                    state = self._other_node(state)
+            # ================================================================
+            # CHATTER - TRUE STREAMING
+            # ================================================================
+            elif current_agent == "CHATTER":
+                logger.info("✅ TRUE STREAMING: CHATTER")
 
+                from config.settings import settings
+
+                return {
+                    "answer_stream": self.chatter_agent.process_streaming(
+                        question=state["question"],
+                        history=state.get("history", []),
+                        support_phone=settings.SUPPORT_PHONE
+                    ),
+                    "references": [{"document_id": "support_contact", "type": "SUPPORT"}],
+                    "status": "STREAMING"
+                }
+
+            # ================================================================
+            # OTHER - TRUE STREAMING
+            # ================================================================
+            elif current_agent == "OTHER":
+                logger.info("✅ TRUE STREAMING: OTHER")
+
+                from config.settings import settings
+
+                return {
+                    "answer_stream": self.other_agent.process_streaming(
+                        question=state["question"],
+                        support_phone=settings.SUPPORT_PHONE
+                    ),
+                    "references": [],
+                    "status": "STREAMING"
+                }
+
+            # ================================================================
+            # REPORTER - Static answer (không cần LLM)
+            # ================================================================
+            elif current_agent == "REPORTER":
+                logger.info("📋 REPORTER: Static message")
+                state = self._reporter_node(state)
                 answer_text = state.get("answer", "")
 
-                async def special_generator():
+                async def reporter_generator():
                     words = answer_text.split()
                     for word in words:
                         yield word + " "
                         await asyncio.sleep(0.01)
 
                 return {
-                    "answer_stream": special_generator(),
+                    "answer_stream": reporter_generator(),
                     "references": state.get("references", []),
                     "status": state.get("status", "SUCCESS")
                 }
 
+            # ================================================================
+            # Fallback
+            # ================================================================
+            else:
+                logger.warning(f"Unknown agent: {current_agent}")
+
+                async def error_generator():
+                    yield "Xin lỗi, không thể xử lý yêu cầu này."
+
+                return {
+                    "answer_stream": error_generator(),
+                    "references": [],
+                    "status": "ERROR"
+                }
+
         except Exception as e:
-            logger.error(f"❌ Streaming error: {e}", exc_info=True)
+            logger.error(f"❌ Streaming workflow error: {e}", exc_info=True)
 
             async def error_generator():
                 yield "Xin lỗi, hệ thống gặp sự cố."
