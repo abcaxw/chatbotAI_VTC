@@ -1,13 +1,8 @@
-# RAG_Core/api/main.py - ADD STREAMING ENDPOINT
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 import logging
 import os
-import json
-import asyncio
-from typing import List, AsyncGenerator
+from typing import List
 
 from .schemas import ChatRequest, ChatResponse, HealthResponse, DocumentReference
 from workflow.rag_workflow import RAGWorkflow
@@ -26,7 +21,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware - cho phép tất cả origins trong Docker
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -62,7 +57,6 @@ async def root():
         "status": "running",
         "endpoints": {
             "chat": "/chat",
-            "stream_chat": "/stream-chat",
             "health": "/health",
             "agents": "/agents"
         },
@@ -76,7 +70,7 @@ async def root():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Main chatbot endpoint (non-streaming)"""
+    """Main chatbot endpoint"""
     try:
         if not rag_workflow:
             raise HTTPException(
@@ -95,7 +89,7 @@ async def chat(request: ChatRequest):
             references.append(DocumentReference(
                 document_id=ref.get("document_id", "unknown"),
                 type=ref.get("type", "DOCUMENT"),
-                description=ref.get("description", None)
+                description=ref.get("description", None)  # Thêm description
             ))
 
         logger.info(f"Response generated with {len(references)} references")
@@ -116,114 +110,18 @@ async def chat(request: ChatRequest):
         )
 
 
-async def generate_stream_response(
-        question: str,
-        history: List
-) -> AsyncGenerator[str, None]:
-    """
-    Generator function for streaming responses
-    Yields Server-Sent Events (SSE) format
-    """
-    try:
-        # Send initial event
-        yield f"data: {json.dumps({'type': 'start', 'message': 'Processing your question...'})}\n\n"
-
-        # Simulate step-by-step processing
-        steps = [
-            ("supervisor", "Analyzing question..."),
-            ("retrieval", "Searching for relevant information..."),
-            ("grading", "Evaluating document quality..."),
-            ("generation", "Generating answer...")
-        ]
-
-        for step_name, step_message in steps:
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'step', 'step': step_name, 'message': step_message})}\n\n"
-
-        # Run the actual workflow
-        result = rag_workflow.run(question, history)
-
-        # Stream the answer word by word (simulate streaming)
-        answer = result.get("answer", "Lỗi xử lý câu hỏi")
-        words = answer.split()
-
-        current_text = ""
-        for i, word in enumerate(words):
-            current_text += word + " "
-
-            # Send chunk every few words
-            if (i + 1) % 5 == 0 or i == len(words) - 1:
-                await asyncio.sleep(0.1)  # Simulate typing delay
-                yield f"data: {json.dumps({'type': 'content', 'content': current_text.strip()})}\n\n"
-
-        # Send references
-        references = []
-        for ref in result.get("references", []):
-            references.append({
-                "document_id": ref.get("document_id", "unknown"),
-                "type": ref.get("type", "DOCUMENT"),
-                "description": ref.get("description", None)
-            })
-
-        yield f"data: {json.dumps({'type': 'references', 'references': references})}\n\n"
-
-        # Send completion event
-        yield f"data: {json.dumps({'type': 'done', 'status': result.get('status', 'SUCCESS')})}\n\n"
-
-    except Exception as e:
-        logger.error(f"Error in stream generation: {e}", exc_info=True)
-        error_msg = json.dumps({
-            'type': 'error',
-            'message': f"Error: {str(e)}"
-        })
-        yield f"data: {error_msg}\n\n"
-
-
-@app.post("/stream-chat")
-async def stream_chat(request: ChatRequest):
-    """
-    Streaming chatbot endpoint
-    Returns Server-Sent Events (SSE) stream
-    """
-    try:
-        if not rag_workflow:
-            raise HTTPException(
-                status_code=503,
-                detail="Workflow not initialized. Please check server logs."
-            )
-
-        logger.info(f"Starting stream for question: {request.question[:100]}...")
-
-        return StreamingResponse(
-            generate_stream_response(request.question, request.history),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"  # Disable nginx buffering
-            }
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in stream chat endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
     try:
+        # Check database connection
         db_connected = False
         try:
             db_connected = milvus_client.check_connection()
         except Exception as db_error:
             logger.warning(f"Database connection check failed: {db_error}")
 
+        # Check workflow status
         workflow_ready = rag_workflow is not None
 
         if db_connected and workflow_ready:
@@ -280,9 +178,30 @@ async def list_agents():
     }
 
 
+@app.get("/status")
+async def system_status():
+    """Detailed system status endpoint"""
+    return {
+        "service": "rag-api",
+        "port": 8501,
+        "workflow_initialized": rag_workflow is not None,
+        "environment": {
+            "ollama_url": os.getenv('OLLAMA_URL', 'http://ollama:11434'),
+            "milvus_host": os.getenv('MILVUS_HOST', 'milvus'),
+            "milvus_port": os.getenv('MILVUS_PORT', '19530')
+        },
+        "components": {
+            "fastapi": "running",
+            "rag_workflow": "ready" if rag_workflow else "not_initialized",
+            "milvus_client": "connected" if milvus_client else "disconnected"
+        }
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
+    # Chạy với host 0.0.0.0 để Docker có thể truy cập
     uvicorn.run(
         app,
         host="0.0.0.0",
