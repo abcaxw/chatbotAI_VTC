@@ -1,9 +1,10 @@
-# RAG_Core/workflow/rag_workflow.py - REFACTORED VERSION
+# RAG_Core/workflow/rag_workflow.py - COMPLETE STREAMING VERSION
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, AsyncIterator
 from langgraph.graph import StateGraph
 from typing_extensions import TypedDict
 import logging
+import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from agents.supervisor import SupervisorAgent
@@ -52,13 +53,11 @@ class RAGWorkflow:
         self.reporter_agent = ReporterAgent()
         self.other_agent = OtherAgent()
 
-        # Thread pool for parallel execution
         self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="RAG-Worker")
-
         self.workflow = self._create_workflow()
 
     def _create_workflow(self):
-        """Tạo workflow graph với parallel execution"""
+        """Tạo workflow graph"""
         workflow = StateGraph(ChatbotState)
 
         # Add nodes
@@ -71,13 +70,9 @@ class RAGWorkflow:
         workflow.add_node("reporter", self._reporter_node)
         workflow.add_node("other", self._other_node)
 
-        # Set entry point
         workflow.set_entry_point("parallel_execution")
-
-        # Flow: parallel → decision
         workflow.add_edge("parallel_execution", "decision_router")
 
-        # Decision router routes to appropriate agent
         workflow.add_conditional_edges(
             "decision_router",
             self._route_after_decision,
@@ -99,7 +94,6 @@ class RAGWorkflow:
             }
         )
 
-        # Terminal nodes
         workflow.add_edge("generator", "__end__")
         workflow.add_edge("not_enough_info", "__end__")
         workflow.add_edge("chatter", "__end__")
@@ -113,177 +107,92 @@ class RAGWorkflow:
         question = state["question"]
         history = state.get("history", [])
 
-        logger.info("🚀 Starting parallel execution: Supervisor + FAQ + RETRIEVER")
+        logger.info("🚀 Starting parallel execution")
 
-        # Submit all tasks
-        future_supervisor = self.executor.submit(
-            self._safe_execute_supervisor,
-            question,
-            history
-        )
+        future_supervisor = self.executor.submit(self._safe_execute_supervisor, question, history)
+        future_faq = self.executor.submit(self._safe_execute_faq, question, history)
+        future_retriever = self.executor.submit(self._safe_execute_retriever, question)
 
-        future_faq = self.executor.submit(
-            self._safe_execute_faq,
-            question,
-            history
-        )
+        supervisor_result = self._get_result_with_timeout(future_supervisor, timeout=20,
+                                                          default={"agent": "FAQ", "contextualized_question": question,
+                                                                   "is_followup": False}, name="Supervisor")
+        faq_result = self._get_result_with_timeout(future_faq, timeout=10,
+                                                   default={"status": "ERROR", "answer": "", "references": []},
+                                                   name="FAQ")
+        retriever_result = self._get_result_with_timeout(future_retriever, timeout=10,
+                                                         default={"status": "ERROR", "documents": []}, name="RETRIEVER")
 
-        future_retriever = self.executor.submit(
-            self._safe_execute_retriever,
-            question
-        )
-
-        # Collect results with timeout handling
-        supervisor_result = self._get_result_with_timeout(
-            future_supervisor,
-            timeout=20,  # Tăng timeout cho SupervisorAgent (có LLM + context processing)
-            default={
-                "agent": "FAQ",  # Safe fallback
-                "contextualized_question": question,
-                "is_followup": False,
-                "context_summary": ""
-            },
-            name="Supervisor"
-        )
-
-        faq_result = self._get_result_with_timeout(
-            future_faq,
-            timeout=10,
-            default={"status": "ERROR", "answer": "", "references": []},
-            name="FAQ"
-        )
-
-        retriever_result = self._get_result_with_timeout(
-            future_retriever,
-            timeout=10,
-            default={"status": "ERROR", "documents": []},
-            name="RETRIEVER"
-        )
-
-        logger.info("✅ All parallel tasks completed")
-
-        # Update state với kết quả từ Supervisor
         state["supervisor_classification"] = supervisor_result
         state["question"] = supervisor_result.get("contextualized_question", question)
         state["is_followup"] = supervisor_result.get("is_followup", False)
         state["context_summary"] = supervisor_result.get("context_summary", "")
-
-        # Store FAQ và Retriever results
         state["faq_result"] = faq_result
         state["retriever_result"] = retriever_result
         state["parallel_mode"] = True
-        state["iteration_count"] = state.get("iteration_count", 0) + 1
-
-        logger.info(f"📝 Contextualized question: {state['question'][:100]}")
-        logger.info(f"🔄 Is follow-up: {state['is_followup']}")
 
         return state
 
     def _get_result_with_timeout(self, future, timeout: float, default: Dict, name: str) -> Dict:
-        """Get result with timeout and fallback"""
         try:
-            result = future.result(timeout=timeout)
-            logger.info(f"✅ {name} completed successfully")
-            return result
+            return future.result(timeout=timeout)
         except FutureTimeoutError:
-            logger.warning(f"⏱️ {name} timeout after {timeout}s, using fallback")
+            logger.warning(f"⏱️ {name} timeout, using fallback")
             return default
         except Exception as e:
             logger.error(f"❌ {name} error: {e}")
             return default
 
     def _safe_execute_supervisor(self, question: str, history: List) -> Dict[str, Any]:
-        """
-        Execute SupervisorAgent.classify_request() với error handling
-        ✅ SỬ DỤNG ĐÚNG SupervisorAgent CLASS
-        """
         try:
             result = self.supervisor.classify_request(question, history)
-            logger.info(f"✅ Supervisor classification: {result.get('agent', 'UNKNOWN')}")
             return result
         except Exception as e:
-            logger.error(f"❌ Supervisor error: {e}", exc_info=True)
-            # Fallback: Rule-based classification
+            logger.error(f"❌ Supervisor error: {e}")
             return self._fallback_supervisor_classification(question)
 
     def _fallback_supervisor_classification(self, question: str) -> Dict[str, Any]:
-        """
-        Fallback classification khi Supervisor agent fail
-        Sử dụng logic đơn giản từ SupervisorAgent._fallback_classify
-        """
         try:
-            # Sử dụng method có sẵn trong SupervisorAgent
             agent = self.supervisor._fallback_classify(question)
-            logger.info(f"⚠️ Using fallback classification: {agent}")
-
             return {
                 "agent": agent,
                 "contextualized_question": question,
-                "context_summary": "Fallback mode - no context",
-                "is_followup": False,
-                "reasoning": "Fallback due to error"
+                "context_summary": "",
+                "is_followup": False
             }
-        except Exception as e:
-            logger.error(f"❌ Fallback classification error: {e}")
+        except Exception:
             return {
                 "agent": "FAQ",
                 "contextualized_question": question,
                 "context_summary": "",
-                "is_followup": False,
-                "reasoning": "Emergency fallback"
+                "is_followup": False
             }
 
     def _safe_execute_faq(self, question: str, history: List) -> Dict[str, Any]:
-        """
-        Execute FAQ với context info
-        LƯU Ý: Chưa có is_followup và context ở đây vì chúng đến từ Supervisor
-        """
         try:
-            # FAQ chạy song song nên chưa có context từ Supervisor
-            # Chỉ truyền question gốc
-            result = self.faq_agent.process(
-                question,
-                is_followup=False,  # Sẽ được update sau
-                context=""
-            )
-            return result
+            return self.faq_agent.process(question, is_followup=False, context="")
         except Exception as e:
             logger.error(f"FAQ error: {e}")
-            return {
-                "status": "ERROR",
-                "answer": "",
-                "references": [],
-                "next_agent": "RETRIEVER"
-            }
+            return {"status": "ERROR", "answer": "", "references": [], "next_agent": "RETRIEVER"}
 
     def _safe_execute_retriever(self, question: str) -> Dict[str, Any]:
-        """Execute RETRIEVER with error handling"""
         try:
-            result = self.retriever_agent.process(question)
-            return result
+            return self.retriever_agent.process(question)
         except Exception as e:
             logger.error(f"RETRIEVER error: {e}")
-            return {
-                "status": "ERROR",
-                "documents": [],
-                "next_agent": "NOT_ENOUGH_INFO"
-            }
+            return {"status": "ERROR", "documents": [], "next_agent": "NOT_ENOUGH_INFO"}
 
     def _decision_router_node(self, state: ChatbotState) -> ChatbotState:
-        """Router thông minh dựa trên kết quả parallel"""
+        """Router dựa trên kết quả parallel"""
         supervisor_agent = state.get("supervisor_classification", {}).get("agent", "FAQ")
         faq_result = state.get("faq_result", {})
         retriever_result = state.get("retriever_result", {})
 
         logger.info(f"🤔 Decision Router: Supervisor={supervisor_agent}")
 
-        # Priority 1: Special cases (CHATTER, REPORTER, OTHER)
         if supervisor_agent in ["CHATTER", "REPORTER", "OTHER"]:
-            logger.info(f"→ Route to {supervisor_agent}")
             state["current_agent"] = supervisor_agent
             return state
 
-        # Priority 2: FAQ success
         if faq_result.get("status") == "SUCCESS":
             logger.info("→ FAQ has answer")
             state["status"] = faq_result["status"]
@@ -292,7 +201,6 @@ class RAGWorkflow:
             state["current_agent"] = "end"
             return state
 
-        # Priority 3: RETRIEVER has documents
         if retriever_result.get("documents"):
             logger.info("→ RETRIEVER → GRADER")
             state["documents"] = retriever_result.get("documents", [])
@@ -300,18 +208,12 @@ class RAGWorkflow:
             state["current_agent"] = "GRADER"
             return state
 
-        # No results
-        logger.info("→ NOT_ENOUGH_INFO")
         state["current_agent"] = "NOT_ENOUGH_INFO"
         return state
 
     def _grader_node(self, state: ChatbotState) -> ChatbotState:
-        """Grader agent"""
         try:
-            result = self.grader_agent.process(
-                state["question"],
-                state.get("documents", [])
-            )
+            result = self.grader_agent.process(state["question"], state.get("documents", []))
             state["status"] = result["status"]
             state["qualified_documents"] = result.get("qualified_documents", [])
             state["references"] = result.get("references", [])
@@ -323,7 +225,6 @@ class RAGWorkflow:
             return state
 
     def _generator_node(self, state: ChatbotState) -> ChatbotState:
-        """Generator agent với full context"""
         try:
             result = self.generator_agent.process(
                 question=state["question"],
@@ -345,7 +246,6 @@ class RAGWorkflow:
             return state
 
     def _not_enough_info_node(self, state: ChatbotState) -> ChatbotState:
-        """Not enough info agent"""
         try:
             result = self.not_enough_info_agent.process(
                 state["question"],
@@ -362,12 +262,8 @@ class RAGWorkflow:
             return state
 
     def _chatter_node(self, state: ChatbotState) -> ChatbotState:
-        """Chatter agent"""
         try:
-            result = self.chatter_agent.process(
-                state["question"],
-                state.get("history", [])
-            )
+            result = self.chatter_agent.process(state["question"], state.get("history", []))
             state["status"] = result["status"]
             state["answer"] = result.get("answer", "")
             state["references"] = result.get("references", [])
@@ -379,7 +275,6 @@ class RAGWorkflow:
             return state
 
     def _reporter_node(self, state: ChatbotState) -> ChatbotState:
-        """Reporter agent"""
         try:
             result = self.reporter_agent.process(state["question"])
             state["status"] = result["status"]
@@ -393,7 +288,6 @@ class RAGWorkflow:
             return state
 
     def _other_node(self, state: ChatbotState) -> ChatbotState:
-        """Other agent"""
         try:
             result = self.other_agent.process(state["question"])
             state["status"] = result["status"]
@@ -407,66 +301,154 @@ class RAGWorkflow:
             return state
 
     def _route_after_decision(self, state: ChatbotState) -> str:
-        """Route after decision"""
         return state.get("current_agent", "end")
 
     def _route_next_agent(self, state: ChatbotState) -> str:
-        """Route to next agent"""
         return state.get("current_agent", "end")
 
     def run(self, question: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
-        """Run workflow"""
+        """Non-streaming run (original)"""
         try:
-            initial_state = ChatbotState(
-                question=question,
-                original_question=question,
-                history=history or [],
-                is_followup=False,
-                context_summary="",
-                relevant_context="",
-                current_agent="parallel_execution",
-                documents=[],
-                qualified_documents=[],
-                references=[],
-                answer="",
-                status="",
-                iteration_count=0,
-                supervisor_classification={},
-                faq_result={},
-                retriever_result={},
-                parallel_mode=False
-            )
-
+            initial_state = self._create_initial_state(question, history)
             logger.info(f"🚀 Workflow start: {question[:100]}")
             final_state = self.workflow.invoke(initial_state)
 
             return {
                 "answer": final_state.get("answer", "Lỗi xử lý"),
                 "references": final_state.get("references", []),
-                "status": final_state.get("status", "ERROR"),
-                "original_question": final_state.get("original_question", question),
-                "processed_question": final_state.get("question", question),
-                "is_followup": final_state.get("is_followup", False),
-                "context_summary": final_state.get("context_summary", ""),
-                "parallel_mode": final_state.get("parallel_mode", False),
-                "supervisor_agent": final_state.get("supervisor_classification", {}).get("agent", "UNKNOWN")
+                "status": final_state.get("status", "ERROR")
             }
-
         except Exception as e:
             logger.error(f"❌ Workflow error: {e}", exc_info=True)
             return {
-                "answer": "Xin lỗi, hệ thống gặp sự cố. Vui lòng thử lại.",
+                "answer": "Xin lỗi, hệ thống gặp sự cố.",
                 "references": [],
-                "status": "ERROR",
-                "original_question": question,
-                "processed_question": question,
-                "is_followup": False,
-                "context_summary": "",
-                "parallel_mode": False,
-                "supervisor_agent": "ERROR"
+                "status": "ERROR"
             }
 
+    async def run_with_streaming(
+            self,
+            question: str,
+            history: List[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """Run workflow với streaming - FIXED"""
+        try:
+            logger.info(f"🚀 Streaming workflow start: {question[:100]}")
+
+            # Run parallel execution
+            initial_state = self._create_initial_state(question, history)
+            state = self._parallel_execution_node(initial_state)
+            state = self._decision_router_node(state)
+
+            current_agent = state.get("current_agent")
+            logger.info(f"📍 Routed to: {current_agent}")
+
+            # Direct answer from FAQ/special agents
+            if current_agent == "end":
+                answer_text = state.get("answer", "")
+
+                async def direct_generator():
+                    words = answer_text.split()
+                    for word in words:
+                        yield word + " "
+                        await asyncio.sleep(0.01)
+
+                return {
+                    "answer_stream": direct_generator(),
+                    "references": state.get("references", []),
+                    "status": state.get("status", "SUCCESS")
+                }
+
+            # Through grader
+            elif current_agent == "GRADER":
+                state = self._grader_node(state)
+
+                if state.get("current_agent") == "GENERATOR":
+                    return {
+                        "answer_stream": self.generator_agent.process_streaming(
+                            question=state["question"],
+                            documents=state.get("qualified_documents", []),
+                            references=state.get("references", []),
+                            history=history or [],
+                            is_followup=state.get("is_followup", False),
+                            context_summary=state.get("context_summary", "")
+                        ),
+                        "references": state.get("references", []),
+                        "status": "STREAMING"
+                    }
+                else:
+                    state = self._not_enough_info_node(state)
+                    answer_text = state.get("answer", "")
+
+                    async def not_enough_generator():
+                        words = answer_text.split()
+                        for word in words:
+                            yield word + " "
+                            await asyncio.sleep(0.01)
+
+                    return {
+                        "answer_stream": not_enough_generator(),
+                        "references": state.get("references", []),
+                        "status": state.get("status", "SUCCESS")
+                    }
+
+            # Special agents
+            else:
+                if current_agent == "CHATTER":
+                    state = self._chatter_node(state)
+                elif current_agent == "REPORTER":
+                    state = self._reporter_node(state)
+                elif current_agent == "OTHER":
+                    state = self._other_node(state)
+
+                answer_text = state.get("answer", "")
+
+                async def special_generator():
+                    words = answer_text.split()
+                    for word in words:
+                        yield word + " "
+                        await asyncio.sleep(0.01)
+
+                return {
+                    "answer_stream": special_generator(),
+                    "references": state.get("references", []),
+                    "status": state.get("status", "SUCCESS")
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Streaming error: {e}", exc_info=True)
+
+            async def error_generator():
+                yield "Xin lỗi, hệ thống gặp sự cố."
+
+            return {
+                "answer_stream": error_generator(),
+                "references": [],
+                "status": "ERROR"
+            }
+
+    def _create_initial_state(self, question: str, history: List = None) -> ChatbotState:
+        """Create initial state"""
+        return ChatbotState(
+            question=question,
+            original_question=question,
+            history=history or [],
+            is_followup=False,
+            context_summary="",
+            relevant_context="",
+            current_agent="parallel_execution",
+            documents=[],
+            qualified_documents=[],
+            references=[],
+            answer="",
+            status="",
+            iteration_count=0,
+            supervisor_classification={},
+            faq_result={},
+            retriever_result={},
+            parallel_mode=False
+        )
+
     def __del__(self):
-        """Cleanup"""
         if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=True, timeout=5)  # Graceful shutdown
+            self.executor.shutdown(wait=True, timeout=5)

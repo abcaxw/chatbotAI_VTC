@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RAG Chatbot Client - Test API từ terminal
-Chạy: python chat_client.py
+Streaming Chat Client - Test streaming API
+Usage: python streaming_client.py
 """
 
 import requests
@@ -11,8 +11,8 @@ from typing import List, Dict
 import time
 
 
-class RAGChatClient:
-    def __init__(self, base_url: str = "http://124.158.6.101:8501"):
+class StreamingChatClient:
+    def __init__(self, base_url: str = "http://localhost:8501"):
         self.base_url = base_url
         self.session = requests.Session()
         self.chat_history = []
@@ -25,7 +25,6 @@ class RAGChatClient:
                 health_data = response.json()
                 print(f"🟢 API Status: {health_data['status']}")
                 print(f"📊 Message: {health_data['message']}")
-                print(f"🔗 Database: {'Connected' if health_data['database_connected'] else 'Disconnected'}")
                 return True
             else:
                 print(f"🔴 API Error: {response.status_code}")
@@ -34,40 +33,119 @@ class RAGChatClient:
             print(f"❌ Connection Error: {e}")
             return False
 
-    def list_agents(self):
-        """Hiển thị danh sách agents"""
-        try:
-            response = self.session.get(f"{self.base_url}/agents", timeout=5)
-            if response.status_code == 200:
-                agents_data = response.json()
-                print("\n🤖 Available Agents:")
-                print("=" * 50)
-                for agent, description in agents_data["agents"].items():
-                    print(f"• {agent}: {description}")
-                print(f"\n🔄 Workflow: {agents_data['workflow']}")
-                return True
-            else:
-                print(f"🔴 Error getting agents: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            return False
-
-    def send_message(self, question: str) -> Dict:
-        """Gửi câu hỏi tới API"""
+    def send_message_streaming(self, question: str) -> None:
+        """
+        Gửi câu hỏi với streaming mode
+        """
         try:
             payload = {
                 "question": question,
-                "history": self.chat_history
+                "history": self.chat_history,
+                "stream": True  # Enable streaming
             }
 
+            print(f"\n❓ Câu hỏi: {question}")
+            print("💬 Trả lời: ", end='', flush=True)
+
+            start_time = time.time()
+            full_answer = ""
+            references = []
+
+            # Stream request
+            with self.session.post(
+                    f"{self.base_url}/chat",
+                    json=payload,
+                    stream=True,
+                    timeout=60
+            ) as response:
+
+                if response.status_code != 200:
+                    print(f"\n🔴 Error: {response.status_code} - {response.text}")
+                    return
+
+                # Process Server-Sent Events
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+
+                        # SSE format: "data: {...}"
+                        if line.startswith('data: '):
+                            data_str = line[6:]  # Remove "data: " prefix
+
+                            try:
+                                chunk_data = json.loads(data_str)
+                                chunk_type = chunk_data.get('type')
+
+                                if chunk_type == 'start':
+                                    # Start of generation
+                                    pass
+
+                                elif chunk_type == 'chunk':
+                                    # Text chunk
+                                    content = chunk_data.get('content', '')
+                                    print(content, end='', flush=True)
+                                    full_answer += content
+
+                                elif chunk_type == 'references':
+                                    # References received
+                                    references = chunk_data.get('references', [])
+
+                                elif chunk_type == 'end':
+                                    # End of generation
+                                    status = chunk_data.get('status', 'SUCCESS')
+                                    print(f"\n\n📊 Status: {status}")
+
+                                elif chunk_type == 'error':
+                                    # Error occurred
+                                    error_msg = chunk_data.get('content', 'Unknown error')
+                                    print(f"\n🔴 Error: {error_msg}")
+                                    return
+
+                            except json.JSONDecodeError as e:
+                                print(f"\n⚠️  JSON parse error: {e}")
+                                continue
+
+            end_time = time.time()
+
+            # Update history
+            self.chat_history.append({"role": "user", "content": question})
+            self.chat_history.append({"role": "assistant", "content": full_answer})
+
+            # Display summary
+            print(f"⏱️  Thời gian: {end_time - start_time:.2f}s")
+
+            if references:
+                print(f"\n📚 Tài liệu tham khảo:")
+                for i, ref in enumerate(references, 1):
+                    print(f"  {i}. {ref['type']}: {ref['document_id']}")
+
+            print("=" * 60)
+
+        except requests.exceptions.Timeout:
+            print("\n⏰ Request timeout")
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+
+    def send_message_non_streaming(self, question: str) -> None:
+        """
+        Gửi câu hỏi với non-streaming mode (original)
+        """
+        try:
+            payload = {
+                "question": question,
+                "history": self.chat_history,
+                "stream": False  # Disable streaming
+            }
+
+            print(f"\n❓ Câu hỏi: {question}")
             print("⏳ Đang xử lý...")
+
             start_time = time.time()
 
             response = self.session.post(
                 f"{self.base_url}/chat",
                 json=payload,
-                timeout=30
+                timeout=60
             )
 
             end_time = time.time()
@@ -75,78 +153,74 @@ class RAGChatClient:
             if response.status_code == 200:
                 result = response.json()
 
-                # Thêm vào history
-                self.chat_history.append({"role": "user", "content": question})
-                self.chat_history.append({"role": "assistant", "content": result["answer"]})
-
-                # Hiển thị kết quả
-                print("\n" + "=" * 60)
-                print(f"❓ Câu hỏi: {question}")
-                print(f"⏱️  Thời gian xử lý: {end_time - start_time:.2f}s")
+                print(f"\n💬 Trả lời:\n{result['answer']}")
+                print(f"\n⏱️  Thời gian: {end_time - start_time:.2f}s")
                 print(f"📊 Status: {result.get('status', 'UNKNOWN')}")
-                print("-" * 60)
-                print(f"💬 Trả lời:\n{result['answer']}")
 
-                # Hiển thị references nếu có
+                # Update history
+                self.chat_history.append({"role": "user", "content": question})
+                self.chat_history.append({"role": "assistant", "content": result['answer']})
+
+                # Display references
                 if result.get("references"):
-                    print("\n📚 Tài liệu tham khảo:")
+                    print(f"\n📚 Tài liệu tham khảo:")
                     for i, ref in enumerate(result["references"], 1):
                         print(f"  {i}. {ref['type']}: {ref['document_id']}")
 
                 print("=" * 60)
-                return result
             else:
-                error_msg = f"API Error {response.status_code}: {response.text}"
-                print(f"🔴 {error_msg}")
-                return {"error": error_msg}
+                print(f"🔴 Error {response.status_code}: {response.text}")
 
-        except requests.exceptions.Timeout:
-            print("⏰ Request timeout - API có thể đang xử lý câu hỏi phức tạp")
-            return {"error": "Timeout"}
         except Exception as e:
             print(f"❌ Error: {e}")
-            return {"error": str(e)}
 
-    def show_history(self):
-        """Hiển thị lịch sử chat"""
-        if not self.chat_history:
-            print("📝 Chưa có lịch sử chat")
-            return
+    def compare_streaming_vs_non_streaming(self, question: str):
+        """So sánh streaming vs non-streaming"""
+        print("\n" + "=" * 60)
+        print("🔬 COMPARISON: STREAMING vs NON-STREAMING")
+        print("=" * 60)
 
-        print("\n📜 Lịch sử chat:")
-        print("=" * 50)
-        for i, msg in enumerate(self.chat_history):
-            role_icon = "👤" if msg["role"] == "user" else "🤖"
-            print(f"{role_icon} {msg['role'].title()}: {msg['content'][:100]}...")
-        print("=" * 50)
+        # Test 1: Non-streaming
+        print("\n[1] NON-STREAMING MODE:")
+        print("-" * 60)
+        self.send_message_non_streaming(question)
 
-    def clear_history(self):
-        """Xóa lịch sử chat"""
+        # Clear history for fair comparison
         self.chat_history.clear()
-        print("🗑️ Đã xóa lịch sử chat")
+
+        # Test 2: Streaming
+        print("\n[2] STREAMING MODE:")
+        print("-" * 60)
+        self.send_message_streaming(question)
+
+        print("\n" + "=" * 60)
+        print("✅ COMPARISON COMPLETE")
+        print("=" * 60)
 
     def interactive_mode(self):
         """Chế độ chat tương tác"""
-        print("🚀 RAG Chatbot Client Started!")
+        print("🚀 Streaming Chat Client Started!")
         print("-" * 50)
 
-        # Kiểm tra kết nối
         if not self.check_health():
-            print("❌ Không thể kết nối tới API. Hãy đảm bảo server đang chạy!")
+            print("❌ Không thể kết nối tới API!")
             return
 
         print("\n💡 Commands:")
-        print("  /help    - Hiển thị help")
-        print("  /agents  - Danh sách agents")
-        print("  /history - Xem lịch sử")
-        print("  /clear   - Xóa lịch sử")
-        print("  /health  - Kiểm tra API")
-        print("  /quit    - Thoát")
+        print("  /stream   - Gửi câu hỏi với streaming")
+        print("  /normal   - Gửi câu hỏi không streaming")
+        print("  /compare  - So sánh streaming vs non-streaming")
+        print("  /history  - Xem lịch sử")
+        print("  /clear    - Xóa lịch sử")
+        print("  /quit     - Thoát")
         print("\n" + "=" * 50)
+
+        streaming_mode = True  # Default: streaming
 
         while True:
             try:
-                question = input("\n❓ Nhập câu hỏi (hoặc /help): ").strip()
+                mode_indicator = "🔄 STREAMING" if streaming_mode else "📋 NORMAL"
+                question = input(f"\n[{mode_indicator}] ❓ Câu hỏi: ").strip()
 
                 if not question:
                     continue
@@ -155,46 +229,54 @@ class RAGChatClient:
                 if question == "/quit":
                     print("👋 Tạm biệt!")
                     break
-                elif question == "/help":
-                    print("\n💡 Commands available:")
-                    print("  /help    - Hiển thị help")
-                    print("  /agents  - Danh sách agents")
-                    print("  /history - Xem lịch sử")
-                    print("  /clear   - Xóa lịch sử")
-                    print("  /health  - Kiểm tra API")
-                    print("  /quit    - Thoát")
-                elif question == "/agents":
-                    self.list_agents()
+                elif question == "/stream":
+                    streaming_mode = True
+                    print("✅ Switched to STREAMING mode")
+                elif question == "/normal":
+                    streaming_mode = False
+                    print("✅ Switched to NON-STREAMING mode")
+                elif question == "/compare":
+                    test_q = input("Câu hỏi để test: ").strip()
+                    if test_q:
+                        self.compare_streaming_vs_non_streaming(test_q)
                 elif question == "/history":
-                    self.show_history()
+                    if self.chat_history:
+                        print("\n📜 Lịch sử chat:")
+                        for msg in self.chat_history:
+                            role = "👤" if msg["role"] == "user" else "🤖"
+                            print(f"{role} {msg['content'][:100]}...")
+                    else:
+                        print("📝 Chưa có lịch sử")
                 elif question == "/clear":
-                    self.clear_history()
-                elif question == "/health":
-                    self.check_health()
-                elif question.startswith("/"):
-                    print("❌ Command không hợp lệ. Gõ /help để xem danh sách commands.")
+                    self.chat_history.clear()
+                    print("🗑️  Đã xóa lịch sử")
                 else:
-                    # Gửi câu hỏi
-                    self.send_message(question)
+                    # Send question
+                    if streaming_mode:
+                        self.send_message_streaming(question)
+                    else:
+                        self.send_message_non_streaming(question)
 
             except KeyboardInterrupt:
                 print("\n👋 Tạm biệt!")
                 break
             except Exception as e:
-                print(f"❌ Unexpected error: {e}")
+                print(f"❌ Error: {e}")
 
 
 def main():
     """Main function"""
     if len(sys.argv) > 1:
         # Single question mode
-        client = RAGChatClient()
+        client = StreamingChatClient()
         question = " ".join(sys.argv[1:])
+
         if client.check_health():
-            client.send_message(question)
+            print("\n🔬 Testing both modes:\n")
+            client.compare_streaming_vs_non_streaming(question)
     else:
         # Interactive mode
-        client = RAGChatClient()
+        client = StreamingChatClient()
         client.interactive_mode()
 
 

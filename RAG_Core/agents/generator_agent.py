@@ -1,6 +1,6 @@
-# RAG_Core/agents/generator_agent.py
+# RAG_Core/agents/generator_agent.py - STREAMING VERSION
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, AsyncIterator
 from models.llm_model import llm_model
 import logging
 
@@ -11,7 +11,7 @@ class GeneratorAgent:
     def __init__(self):
         self.name = "GENERATOR"
 
-        # Prompt cho câu hỏi thông thường
+        # Standard prompt (unchanged)
         self.standard_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp.
 
 Câu hỏi của khách hàng: "{question}"
@@ -30,7 +30,7 @@ Yêu cầu trả lời:
 
 Hãy trả lời như đang nói chuyện trực tiếp với khách hàng:"""
 
-        # Prompt cho follow-up question (có context)
+        # Follow-up prompt (unchanged)
         self.followup_prompt = """Bạn là một chuyên viên tư vấn khách hàng người Việt Nam thân thiện và chuyên nghiệp.
 
 🔍 NGỮ CẢNH CUỘC TRÒ CHUYỆN:
@@ -58,7 +58,7 @@ Hãy trả lời như đang nói chuyện trực tiếp với khách hàng:"""
 Hãy trả lời:"""
 
     def _deduplicate_references(self, references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Loại bỏ các reference trùng lặp dựa trên document_id"""
+        """Loại bỏ references trùng lặp"""
         if not references:
             return []
 
@@ -79,7 +79,7 @@ Hãy trả lời:"""
             return "Không có tài liệu tham khảo"
 
         doc_lines = []
-        for i, doc in enumerate(documents[:5], 1):  # Chỉ lấy top 5
+        for i, doc in enumerate(documents[:5], 1):
             description = doc.get('description', '')
             score = doc.get('similarity_score', 0)
             doc_lines.append(f"[Tài liệu {i}] (Độ liên quan: {score:.2f})\n{description}")
@@ -87,11 +87,11 @@ Hãy trả lời:"""
         return "\n\n".join(doc_lines)
 
     def _format_history(self, history: List, max_turns: int = 2) -> str:
-        """Format lịch sử hội thoại, xử lý cả dict và ChatMessage objects"""
+        """Format lịch sử hội thoại"""
         if not history:
             return "Không có lịch sử"
 
-        # Normalize history first
+        # Normalize history
         normalized_history = []
         for msg in history:
             if isinstance(msg, dict):
@@ -100,13 +100,12 @@ Hãy trả lời:"""
                     "content": msg.get("content", "")
                 })
             else:
-                # ChatMessage object
                 normalized_history.append({
                     "role": getattr(msg, "role", ""),
                     "content": getattr(msg, "content", "")
                 })
 
-        # Lấy N turn gần nhất (mỗi turn = 2 messages)
+        # Lấy N turn gần nhất
         recent_history = normalized_history[-(max_turns * 2):] if len(
             normalized_history) > max_turns * 2 else normalized_history
 
@@ -120,7 +119,7 @@ Hãy trả lời:"""
         return "\n".join(history_lines) if history_lines else "Không có lịch sử"
 
     def _extract_context_summary(self, history: List) -> str:
-        """Trích xuất tóm tắt ngữ cảnh từ lịch sử, xử lý cả dict và ChatMessage"""
+        """Trích xuất context summary"""
         if not history or len(history) < 2:
             return "Đây là câu hỏi đầu tiên"
 
@@ -135,12 +134,11 @@ Hãy trả lời:"""
                     "content": getattr(msg, "content", "")
                 })
 
-        # Lấy câu hỏi trước và câu trả lời trước
+        # Lấy câu hỏi trước
         for i in range(len(normalized_history) - 1, -1, -1):
             if normalized_history[i].get("role") == "user":
                 prev_question = normalized_history[i].get("content", "")
 
-                # Tìm câu trả lời tương ứng
                 for j in range(i + 1, len(normalized_history)):
                     if normalized_history[j].get("role") == "assistant":
                         prev_answer = normalized_history[j].get("content", "")
@@ -160,7 +158,7 @@ Hãy trả lời:"""
             context_summary: str = "",
             **kwargs
     ) -> Dict[str, Any]:
-        """Tạo câu trả lời từ tài liệu đã được đánh giá"""
+        """Non-streaming generation (original)"""
         try:
             if not documents:
                 return {
@@ -170,15 +168,11 @@ Hãy trả lời:"""
                     "next_agent": "end"
                 }
 
-            # Format documents
             doc_text = self._format_documents(documents)
-
-            # Format history
             history_text = self._format_history(history or [], max_turns=2)
 
-            # Chọn prompt phù hợp
+            # Chọn prompt
             if is_followup:
-                # Sử dụng prompt đặc biệt cho follow-up
                 if not context_summary:
                     context_summary = self._extract_context_summary(history or [])
 
@@ -188,30 +182,20 @@ Hãy trả lời:"""
                     recent_history=history_text,
                     documents=doc_text
                 )
-
-                logger.info(f"Using follow-up prompt for question: {question}")
-                logger.info(f"Context: {context_summary}")
             else:
-                # Sử dụng prompt thông thường
                 prompt = self.standard_prompt.format(
                     question=question,
                     history=history_text,
                     documents=doc_text
                 )
 
-                logger.info(f"Using standard prompt for question: {question}")
-
-            # Tạo câu trả lời
+            # Generate answer (non-streaming)
             answer = llm_model.invoke(prompt)
 
-            # Validate answer
             if not answer or len(answer.strip()) < 10:
-                answer = "Tôi đã tìm thấy thông tin liên quan nhưng gặp khó khăn trong việc tạo câu trả lời. Bạn có thể diễn đạt câu hỏi theo cách khác được không?"
+                answer = "Tôi đã tìm thấy thông tin liên quan nhưng gặp khó khăn trong việc tạo câu trả lời."
 
-            # Loại bỏ references trùng lặp
             unique_references = self._deduplicate_references(references or [])
-
-            logger.info(f"Generated answer with {len(unique_references)} references")
 
             return {
                 "status": "SUCCESS",
@@ -228,3 +212,56 @@ Hãy trả lời:"""
                 "references": [],
                 "next_agent": "end"
             }
+
+    async def process_streaming(
+            self,
+            question: str,
+            documents: List[Dict[str, Any]],
+            references: List[Dict[str, Any]] = None,
+            history: List[Dict[str, str]] = None,
+            is_followup: bool = False,
+            context_summary: str = "",
+            **kwargs
+    ) -> AsyncIterator[str]:
+        """
+        Streaming generation - trả về generator
+
+        Usage:
+            async for chunk in generator_agent.process_streaming(...):
+                yield chunk
+        """
+        try:
+            if not documents:
+                yield "Không có tài liệu để tạo câu trả lời"
+                return
+
+            doc_text = self._format_documents(documents)
+            history_text = self._format_history(history or [], max_turns=2)
+
+            # Chọn prompt
+            if is_followup:
+                if not context_summary:
+                    context_summary = self._extract_context_summary(history or [])
+
+                prompt = self.followup_prompt.format(
+                    question=question,
+                    context_summary=context_summary,
+                    recent_history=history_text,
+                    documents=doc_text
+                )
+            else:
+                prompt = self.standard_prompt.format(
+                    question=question,
+                    history=history_text,
+                    documents=doc_text
+                )
+
+            logger.info(f"Starting streaming generation for question: {question[:50]}...")
+
+            # Stream từ LLM
+            async for chunk in llm_model.astream(prompt):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"Error in streaming generator: {e}", exc_info=True)
+            yield f"\n\n[Lỗi: {str(e)}]"
