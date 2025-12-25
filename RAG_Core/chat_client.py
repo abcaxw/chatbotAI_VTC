@@ -34,24 +34,22 @@ class StreamingChatClient:
             return False
 
     def send_message_streaming(self, question: str) -> None:
-        """
-        Gửi câu hỏi với streaming mode
-        """
         try:
             payload = {
                 "question": question,
                 "history": self.chat_history,
-                "stream": True  # Enable streaming
+                "stream": True
             }
 
             print(f"\n❓ Câu hỏi: {question}")
             print("💬 Trả lời: ", end='', flush=True)
 
             start_time = time.time()
+            first_chunk_time = None
+
             full_answer = ""
             references = []
 
-            # Stream request
             with self.session.post(
                     f"{self.base_url}/chat",
                     json=payload,
@@ -60,69 +58,54 @@ class StreamingChatClient:
             ) as response:
 
                 if response.status_code != 200:
-                    print(f"\n🔴 Error: {response.status_code} - {response.text}")
+                    print(f"\n🔴 Error: {response.status_code}")
                     return
 
-                # Process Server-Sent Events
                 for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
+                    if not line:
+                        continue
 
-                        # SSE format: "data: {...}"
-                        if line.startswith('data: '):
-                            data_str = line[6:]  # Remove "data: " prefix
+                    line = line.decode("utf-8")
 
-                            try:
-                                chunk_data = json.loads(data_str)
-                                chunk_type = chunk_data.get('type')
+                    if not line.startswith("data: "):
+                        continue
 
-                                if chunk_type == 'start':
-                                    # Start of generation
-                                    pass
+                    data_str = line[6:]
 
-                                elif chunk_type == 'chunk':
-                                    # Text chunk
-                                    content = chunk_data.get('content', '')
-                                    print(content, end='', flush=True)
-                                    full_answer += content
+                    try:
+                        chunk_data = json.loads(data_str)
+                        chunk_type = chunk_data.get("type")
 
-                                elif chunk_type == 'references':
-                                    # References received
-                                    references = chunk_data.get('references', [])
+                        if chunk_type == "chunk":
+                            # ⏱️ FIRST CHUNK TIMING
+                            if first_chunk_time is None:
+                                first_chunk_time = time.time()
+                                latency = first_chunk_time - start_time - 1
 
-                                elif chunk_type == 'end':
-                                    # End of generation
-                                    status = chunk_data.get('status', 'SUCCESS')
-                                    print(f"\n\n📊 Status: {status}")
+                            content = chunk_data.get("content", "")
+                            print(content, end="", flush=True)
+                            full_answer += content
 
-                                elif chunk_type == 'error':
-                                    # Error occurred
-                                    error_msg = chunk_data.get('content', 'Unknown error')
-                                    print(f"\n🔴 Error: {error_msg}")
-                                    return
+                        elif chunk_type == "references":
+                            references = chunk_data.get("references", [])
 
-                            except json.JSONDecodeError as e:
-                                print(f"\n⚠️  JSON parse error: {e}")
-                                continue
+                        elif chunk_type == "end":
+                            print("\n\n📊 Status:", chunk_data.get("status", "SUCCESS"))
+
+                    except json.JSONDecodeError:
+                        continue
 
             end_time = time.time()
 
             # Update history
-            self.chat_history.append({"role": "user", "content": question})
-            self.chat_history.append({"role": "assistant", "content": full_answer})
+            self.chat_history.extend([
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": full_answer}
+            ])
 
-            # Display summary
-            print(f"⏱️  Thời gian: {end_time - start_time:.2f}s")
-
-            if references:
-                print(f"\n📚 Tài liệu tham khảo:")
-                for i, ref in enumerate(references, 1):
-                    print(f"  {i}. {ref['type']}: {ref['document_id']}")
-
+            print(f"⏱️  Total streaming time: {latency:.2f}s")
             print("=" * 60)
 
-        except requests.exceptions.Timeout:
-            print("\n⏰ Request timeout")
         except Exception as e:
             print(f"\n❌ Error: {e}")
 
