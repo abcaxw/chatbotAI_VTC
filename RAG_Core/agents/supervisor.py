@@ -3,7 +3,6 @@
 from typing import Dict, Any, List
 from langchain_core.messages import HumanMessage, SystemMessage
 from models.llm_model import llm_model
-from tools.vector_search import check_database_connection
 import logging
 import json
 import re
@@ -22,7 +21,12 @@ class SupervisorAgent:
         3. Phân loại câu hỏi và chọn agent phù hợp để xử lý.
 
         Các agent có thể chọn:
-        - FAQ: Dùng cho chào hỏi thân thiện, câu hỏi thường gặp, hoặc các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân và doanh nghiệp.
+        - FAQ: 
+            - Dùng cho chào hỏi thân thiện, câu hỏi thường gặp. 
+            - Các yêu cầu liên quan đến đào tạo kỹ năng chuyển đổi số cho người dân và doanh nghiệp.
+            - Kiến thức về AI, CNTT.
+            - An toàn giao thông tin, bảo mật.
+            - Luật liên quan đến chuyển đổi số.
         - OTHER: Câu hỏi hoặc yêu cầu nằm ngoài phạm vi chuyển đổi số.
         - CHATTER: Người dùng có dấu hiệu không hài lòng, giận dữ, hoặc cần được an ủi, làm dịu.
         - REPORTER: Khi người dùng phản ánh lỗi, mất kết nối, hoặc vấn đề kỹ thuật của hệ thống.
@@ -30,7 +34,6 @@ class SupervisorAgent:
         Đầu vào:
         Câu hỏi hiện tại: "{question}"
         Lịch sử hội thoại: {history}
-        Trạng thái hệ thống: {system_status}
 
         YÊU CẦU QUAN TRỌNG:
         - Phân tích xem câu hỏi có phải follow-up (tiếp theo cuộc trò chuyện trước) không
@@ -71,17 +74,6 @@ class SupervisorAgent:
             logger.info(f"📝 Question: '{question}'")
             logger.info(f"📚 History Length: {len(history) if history else 0} messages")
 
-            # Kiểm tra trạng thái hệ thống
-            db_status = check_database_connection.invoke({})
-
-            if not db_status.get("connected", False):
-                logger.warning("⚠️  Database not connected → REPORTER")
-                return {
-                    "agent": "REPORTER",
-                    "contextualized_question": question,
-                    "context_summary": "Hệ thống mất kết nối",
-                    "is_followup": False
-                }
 
             # Format lịch sử
             history_text = self._format_history(history or [])
@@ -90,7 +82,6 @@ class SupervisorAgent:
             prompt = self.classification_prompt.format(
                 question=question,
                 history=history_text,
-                system_status="Bình thường" if db_status.get("connected") else "Lỗi kết nối"
             )
 
             # Gọi LLM để phân loại VÀ làm rõ context

@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Public ngrok URL (for user-facing responses)
     # Example: "https://b1234567.ngrok-free.app"
-    NGROK_PUBLIC_URL: Optional[str] = "https://15a38b312f70.ngrok-free.app"
+    NGROK_PUBLIC_URL: Optional[str] = "http://124.158.6.101:9000"
 
     # Enable URL replacement
     ENABLE_URL_REPLACEMENT: bool = True

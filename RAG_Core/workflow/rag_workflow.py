@@ -438,6 +438,7 @@ class RAGWorkflow:
             state["answer"] = "Hệ thống đang bảo trì"
             return state
 
+
     def _other_node(self, state: ChatbotState) -> ChatbotState:
         try:
             result = self.other_agent.process(state["question"])
@@ -557,6 +558,7 @@ class RAGWorkflow:
                                 return {
                                     "answer_stream": self.faq_agent.process_streaming(
                                         question=state["question"],
+                                        reranked_faqs=reranked_faqs,
                                         is_followup=state.get("is_followup", False),
                                         context=state.get("context_summary", "")
                                     ),

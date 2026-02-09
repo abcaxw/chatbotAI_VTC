@@ -1,4 +1,4 @@
-# RAG_Core/tools/vector_search.py (COHERE RERANKER - STANDALONE)
+# RAG_Core/tools/vector_search.py - UPDATED WITH PERSONALIZATION SUPPORT
 
 from langchain_core.tools import tool
 from typing import List, Dict, Any
@@ -337,7 +337,55 @@ def hybrid_rerank_faq(
 
 
 # ============================================================================
-# SEARCH FUNCTIONS (Unchanged)
+# PERSONALIZATION SEARCH FUNCTIONS - NEW
+# ============================================================================
+
+@tool
+def search_personalization_documents(query: str) -> List[Dict[str, Any]]:
+    """Tìm kiếm tài liệu trong personalization database"""
+    try:
+        from database.personalization_milvus_client import personalization_milvus_client
+
+        # Encode query
+        query_vector = embedding_model.encode_single(query)
+
+        # Search in personalization DB
+        results = personalization_milvus_client.search_documents(query_vector, settings.TOP_K)
+        logger.info(f"✅ Found {len(results)} personalization documents")
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in search_personalization_documents: {str(e)}")
+        return [{"error": f"Lỗi tìm kiếm tài liệu: {str(e)}"}]
+
+
+@tool
+def search_personalization_faq(query: str, top_k: int = None) -> List[Dict[str, Any]]:
+    """
+    Tìm kiếm FAQ trong personalization database
+    """
+    try:
+        from database.personalization_milvus_client import personalization_milvus_client
+
+        if top_k is None:
+            top_k = getattr(settings, 'FAQ_TOP_K', 10)
+
+        # Encode query
+        query_vector = embedding_model.encode_single(query)
+
+        # Search in personalization FAQ
+        results = personalization_milvus_client.search_faq(query_vector, top_k)
+        logger.info(f"✅ Retrieved {len(results)} personalization FAQ candidates")
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in search_personalization_faq: {str(e)}")
+        return [{"error": f"Lỗi tìm kiếm FAQ: {str(e)}"}]
+
+
+# ============================================================================
+# STANDARD SEARCH FUNCTIONS (Original DB)
 # ============================================================================
 
 def pad_vector_to_dimension(vector: np.ndarray, target_dim: int) -> np.ndarray:
@@ -377,7 +425,7 @@ def safe_encode_and_fix_dimension(query: str, target_collection: str, target_fie
 
 @tool
 def search_documents(query: str) -> List[Dict[str, Any]]:
-    """Tìm kiếm tài liệu liên quan đến câu hỏi"""
+    """Tìm kiếm tài liệu liên quan đến câu hỏi (Standard DB)"""
     try:
         query_vector = safe_encode_and_fix_dimension(
             query,
@@ -396,7 +444,7 @@ def search_documents(query: str) -> List[Dict[str, Any]]:
 @tool
 def search_faq(query: str, top_k: int = None) -> List[Dict[str, Any]]:
     """
-    Tìm kiếm FAQ với top_k cao hơn để reranking có nhiều lựa chọn
+    Tìm kiếm FAQ với top_k cao hơn để reranking có nhiều lựa chọn (Standard DB)
     """
     try:
         if top_k is None:

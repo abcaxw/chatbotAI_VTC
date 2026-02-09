@@ -1,4 +1,4 @@
-# RAG_Core/workflow/personalized_rag_workflow.py
+# RAG_Core/workflow/personalized_rag_workflow.py - UPDATED TO USE PERSONALIZATION DB
 
 from typing import Dict, Any, List, AsyncIterator
 from langgraph.graph import StateGraph
@@ -8,13 +8,16 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from agents.supervisor import SupervisorAgent
-from agents.retriever_agent import RetrieverAgent
 from agents.grader_agent import GraderAgent
 from agents.reporter_agent import ReporterAgent
 
-# Import 2 agent mới
+# ✅ IMPORT PERSONALIZATION AGENTS
 from agents.personalization_faq_agent import PersonalizationFAQAgent
 from agents.personalization_generator_agent import PersonalizationGeneratorAgent
+from services.personalization_document_url_service import personalization_document_url_service
+
+# ✅ NEW: Import personalized retriever
+from agents.personalized_retriever_agent import PersonalizedRetrieverAgent
 
 from agents.base_agent import (
     StreamingChatterAgent,
@@ -54,19 +57,21 @@ class PersonalizedChatbotState(TypedDict):
 
 class PersonalizedRAGWorkflow:
     """
-    RAG Workflow với personalization - Sử dụng 2 agent mới
+    RAG Workflow với personalization - UPDATED TO USE PERSONALIZATION DB
     """
 
     def __init__(self):
         # Core agents
         self.supervisor = SupervisorAgent()
-        self.retriever_agent = RetrieverAgent()
         self.grader_agent = GraderAgent()
         self.reporter_agent = ReporterAgent()
 
-        # NEW: Personalization agents
+        # ✅ PERSONALIZATION AGENTS (using personalization DB)
         self.personalization_faq_agent = PersonalizationFAQAgent()
         self.personalization_generator_agent = PersonalizationGeneratorAgent()
+
+        # ✅ NEW: Personalized retriever
+        self.personalized_retriever_agent = PersonalizedRetrieverAgent()
 
         # Streaming-enabled agents
         self.chatter_agent = StreamingChatterAgent()
@@ -125,15 +130,25 @@ class PersonalizedRAGWorkflow:
         return workflow.compile()
 
     def _enrich_references_with_urls(self, references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Enrich references with URLs"""
+        """
+        Enrich references with URLs from personalization_document_urls
+
+        Args:
+            references: List of reference dicts
+
+        Returns:
+            List of enriched references
+        """
         try:
             if not references:
                 return []
 
-            enriched = document_url_service.enrich_references_with_urls(references)
+            enriched = personalization_document_url_service.enrich_references_with_urls(references)
             urls_added = sum(1 for ref in enriched if ref.get('url'))
+
             if urls_added > 0:
                 logger.info(f"🔗 Enriched {urls_added}/{len(references)} references with URLs")
+
             return enriched
 
         except Exception as e:
@@ -141,12 +156,12 @@ class PersonalizedRAGWorkflow:
             return references
 
     # ================================================================
-    # PARALLEL EXECUTION
+    # PARALLEL EXECUTION - UPDATED TO USE PERSONALIZATION DB
     # ================================================================
 
     def _parallel_execution_node(self, state: PersonalizedChatbotState) -> PersonalizedChatbotState:
         """
-        Parallel execution với personalized FAQ agent
+        Parallel execution với personalized FAQ agent (using personalization DB)
         """
         question = state["question"]
         history = state.get("history", [])
@@ -155,7 +170,7 @@ class PersonalizedRAGWorkflow:
 
         skip_faq = state.get("streaming_mode", False)
 
-        logger.info("🚀 Starting personalized parallel execution")
+        logger.info("🚀 Starting personalized parallel execution (PERSONALIZATION DB)")
         logger.info(f"   Customer: {customer_name}")
         if skip_faq:
             logger.info("⏭️  Skipping FAQ (streaming mode)")
@@ -184,7 +199,7 @@ class PersonalizedRAGWorkflow:
             f"   Contextualized: {contextualized_question[:60]}"
         )
 
-        # Step 2: FAQ + RETRIEVER in parallel
+        # Step 2: FAQ + RETRIEVER in parallel (both from PERSONALIZATION DB)
         if skip_faq:
             faq_result = {
                 "status": "SKIPPED",
@@ -193,7 +208,7 @@ class PersonalizedRAGWorkflow:
                 "message": "FAQ skipped for streaming mode"
             }
         else:
-            # Use PERSONALIZATION FAQ AGENT
+            # ✅ Use PERSONALIZATION FAQ AGENT (searches personalization DB)
             future_faq = self.executor.submit(
                 self._safe_execute_personalized_faq,
                 contextualized_question,
@@ -211,13 +226,14 @@ class PersonalizedRAGWorkflow:
             )
 
             if faq_result.get("references"):
+                # Enrich from PERSONALIZATION_DB
                 faq_result["references"] = self._enrich_references_with_urls(
                     faq_result["references"]
                 )
 
-        # RETRIEVER
+        # ✅ RETRIEVER (using PERSONALIZATION DB)
         future_retriever = self.executor.submit(
-            self._safe_execute_retriever,
+            self._safe_execute_personalized_retriever,
             question,
             contextualized_question,
             is_followup
@@ -227,7 +243,7 @@ class PersonalizedRAGWorkflow:
             future_retriever,
             timeout=10,
             default={"status": "ERROR", "documents": []},
-            name="RETRIEVER"
+            name="Personalized RETRIEVER"
         )
 
         state["supervisor_classification"] = supervisor_result
@@ -240,7 +256,7 @@ class PersonalizedRAGWorkflow:
         state["parallel_mode"] = True
 
         logger.info(
-            f"✅ Personalized parallel execution completed:\n"
+            f"✅ Personalized parallel execution completed (PERSONALIZATION DB):\n"
             f"  - FAQ: {faq_result.get('status')}\n"
             f"  - RETRIEVER: {retriever_result.get('status')}"
         )
@@ -277,7 +293,7 @@ class PersonalizedRAGWorkflow:
             is_followup: bool = False,
             context_summary: str = ""
     ) -> Dict[str, Any]:
-        """Execute PERSONALIZED FAQ agent"""
+        """Execute PERSONALIZED FAQ agent (using personalization DB)"""
         try:
             return self.personalization_faq_agent.process(
                 question=question,
@@ -295,21 +311,21 @@ class PersonalizedRAGWorkflow:
                 "next_agent": "RETRIEVER"
             }
 
-    def _safe_execute_retriever(
+    def _safe_execute_personalized_retriever(
             self,
             original_question: str,
             contextualized_question: str,
             is_followup: bool = False
     ) -> Dict[str, Any]:
-        """Retriever execution"""
+        """✅ Execute PERSONALIZED RETRIEVER (using personalization DB)"""
         try:
-            return self.retriever_agent.process(
+            return self.personalized_retriever_agent.process(
                 question=original_question,
                 contextualized_question=contextualized_question,
                 is_followup=is_followup
             )
         except Exception as e:
-            logger.error(f"RETRIEVER error: {e}")
+            logger.error(f"Personalized RETRIEVER error: {e}")
             return {
                 "status": "ERROR",
                 "documents": [],
@@ -330,7 +346,7 @@ class PersonalizedRAGWorkflow:
 
         # Accept FAQ if SUCCESS
         if faq_result.get("status") == "SUCCESS":
-            logger.info("→ Personalized FAQ has answer")
+            logger.info("→ Personalized FAQ has answer (from personalization DB)")
             state["status"] = faq_result["status"]
             state["answer"] = faq_result.get("answer", "")
             state["references"] = faq_result.get("references", [])
@@ -338,7 +354,7 @@ class PersonalizedRAGWorkflow:
             return state
 
         if retriever_result.get("documents"):
-            logger.info("→ RETRIEVER → GRADER")
+            logger.info("→ Personalized RETRIEVER → GRADER (personalization DB)")
             state["documents"] = retriever_result.get("documents", [])
             state["status"] = retriever_result.get("status", "SUCCESS")
             state["current_agent"] = "GRADER"
@@ -355,7 +371,7 @@ class PersonalizedRAGWorkflow:
             documents = state.get("documents", [])
             is_followup = state.get("is_followup", False)
 
-            logger.info(f"📊 Grader: Processing {len(documents)} documents")
+            logger.info(f"📊 Grader: Processing {len(documents)} documents (from personalization DB)")
 
             result = self.grader_agent.process(
                 question=original_question,
@@ -390,7 +406,7 @@ class PersonalizedRAGWorkflow:
     def _personalized_generator_node(self, state: PersonalizedChatbotState) -> PersonalizedChatbotState:
         """PERSONALIZED GENERATOR node"""
         try:
-            logger.info("🎭 Using Personalized Generator")
+            logger.info("🎭 Using Personalized Generator (docs from personalization DB)")
 
             result = self.personalization_generator_agent.process(
                 question=state["question"],
@@ -439,11 +455,12 @@ class PersonalizedRAGWorkflow:
             customer_name = state.get("customer_name", "")
             greeting = f"Thưa Anh/Chị {customer_name}" if customer_name else "Xin chào"
 
+            from config.settings import settings
             state["answer"] = f"""{greeting},
 
-    Không tìm thấy thông tin phù hợp trong hệ thống.
+Không tìm thấy thông tin phù hợp trong hệ thống.
 
-    Để được hỗ trợ tốt nhất, vui lòng liên hệ hotline: {settings.SUPPORT_PHONE}"""
+Để được hỗ trợ tốt nhất, vui lòng liên hệ hotline: {settings.SUPPORT_PHONE}"""
             state["current_agent"] = "end"
             return state
 
@@ -504,7 +521,7 @@ class PersonalizedRAGWorkflow:
             customer_introduction: str = ""
     ) -> Dict[str, Any]:
         """
-        Non-streaming run với personalization
+        Non-streaming run với personalization (using personalization DB)
         """
         try:
             initial_state = self._create_initial_state(
@@ -515,7 +532,7 @@ class PersonalizedRAGWorkflow:
                 streaming_mode=False
             )
 
-            logger.info(f"🚀 Personalized workflow start: {question[:100]}")
+            logger.info(f"🚀 Personalized workflow start (PERSONALIZATION DB): {question[:100]}")
             logger.info(f"   Customer: {customer_name}")
 
             final_state = self.workflow.invoke(initial_state)
@@ -525,7 +542,8 @@ class PersonalizedRAGWorkflow:
                 "references": final_state.get("references", []),
                 "status": final_state.get("status", "ERROR"),
                 "personalized": bool(customer_name or customer_introduction),
-                "customer_name": customer_name
+                "customer_name": customer_name,
+                "source": "personalization_db"
             }
 
         except Exception as e:
@@ -545,10 +563,10 @@ class PersonalizedRAGWorkflow:
             customer_introduction: str = ""
     ) -> Dict[str, Any]:
         """
-        Streaming run với personalization
+        Streaming run với personalization (using personalization DB)
         """
         try:
-            logger.info(f"🚀 Personalized streaming workflow")
+            logger.info(f"🚀 Personalized streaming workflow (PERSONALIZATION DB)")
             logger.info(f"   Question: {question[:100]}")
             logger.info(f"   Customer: {customer_name}")
 
@@ -568,14 +586,15 @@ class PersonalizedRAGWorkflow:
 
             logger.info(f"📍 Routed to: {current_agent}")
 
-            # FAQ - Check confidence first
+            # FAQ - Check confidence first (using personalization DB)
             if supervisor_agent == "FAQ":
-                logger.info("🔍 FAQ classified - checking confidence...")
+                logger.info("🔍 FAQ classified - checking confidence in personalization DB...")
 
-                from tools.vector_search import search_faq, rerank_faq
+                # ✅ IMPORT PERSONALIZATION TOOLS
+                from tools.vector_search import search_personalization_faq, rerank_faq
                 from config.settings import settings
 
-                faq_results = search_faq.invoke({"query": state["question"]})
+                faq_results = search_personalization_faq.invoke({"query": state["question"]})
 
                 if not faq_results or "error" in str(faq_results):
                     logger.warning("❌ FAQ search failed → GRADER")
@@ -600,7 +619,7 @@ class PersonalizedRAGWorkflow:
                             current_agent = "GRADER"
                         else:
                             best_score = reranked_faqs[0].get("rerank_score", 0)
-                            logger.info(f"📊 FAQ best score: {best_score:.3f}")
+                            logger.info(f"📊 FAQ best score (personalization DB): {best_score:.3f}")
 
                             if best_score >= settings.FAQ_RERANK_THRESHOLD:
                                 logger.info("✅ FAQ CONFIDENT - Streaming personalized answer")
@@ -619,7 +638,8 @@ class PersonalizedRAGWorkflow:
                                             "document_id": reranked_faqs[0].get("faq_id"),
                                             "type": "FAQ",
                                             "description": reranked_faqs[0].get("question", ""),
-                                            "rerank_score": round(best_score, 4)
+                                            "rerank_score": round(best_score, 4),
+                                            "source": "personalization_db"
                                         }
                                     ],
                                     "status": "STREAMING",
@@ -634,7 +654,7 @@ class PersonalizedRAGWorkflow:
                 state = self._grader_node(state)
 
                 if state.get("current_agent") == "PERSONALIZED_GENERATOR":
-                    logger.info("✅ STREAMING: PERSONALIZED GENERATOR")
+                    logger.info("✅ STREAMING: PERSONALIZED GENERATOR (personalization DB)")
                     return {
                         "answer_stream": self.personalization_generator_agent.process_streaming(
                             question=state["question"],
@@ -648,7 +668,8 @@ class PersonalizedRAGWorkflow:
                         ),
                         "references": state.get("references", []),
                         "status": "STREAMING",
-                        "personalized": True
+                        "personalized": True,
+                        "source": "personalization_db"
                     }
                 else:
                     logger.info("✅ STREAMING: PERSONALIZED NOT_ENOUGH_INFO")
@@ -661,7 +682,7 @@ class PersonalizedRAGWorkflow:
                         ),
                         "references": [{"document_id": "llm_knowledge", "type": "GENERAL_KNOWLEDGE"}],
                         "status": "STREAMING",
-                        "personalized": True  # Changed to True
+                        "personalized": True
                     }
 
             # Other agents (CHATTER, OTHER, REPORTER)

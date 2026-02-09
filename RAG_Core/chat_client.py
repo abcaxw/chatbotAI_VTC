@@ -1,21 +1,20 @@
-#!/usr/bin/env python3
+# RAG_Core/personalized_chat_client.py
+
+# !/usr/bin/env python3
 """
-Streaming Chat Client - Test streaming API
-Usage: python streaming_client.py
+Personalized Chat Client - Test personalized API
+Usage: python personalized_chat_client.py
 """
 
 import requests
 import json
 import sys
-from typing import List, Dict
-import time
 
 
-class StreamingChatClient:
-    def __init__(self, base_url: str = "http://localhost:8501/"):
+class PersonalizedChatClient:
+    def __init__(self, base_url: str = "http://localhost:8502"):
         self.base_url = base_url
         self.session = requests.Session()
-        self.chat_history = []
 
     def check_health(self):
         """Kiểm tra tình trạng API"""
@@ -25,6 +24,7 @@ class StreamingChatClient:
                 health_data = response.json()
                 print(f"🟢 API Status: {health_data['status']}")
                 print(f"📊 Message: {health_data['message']}")
+                print(f"🎭 Personalization: {'Enabled' if health_data.get('personalization_enabled') else 'Disabled'}")
                 return True
             else:
                 print(f"🔴 API Error: {response.status_code}")
@@ -33,22 +33,29 @@ class StreamingChatClient:
             print(f"❌ Connection Error: {e}")
             return False
 
-    def send_message_streaming(self, question: str) -> None:
+    def send_personalized_message_streaming(
+            self,
+            question: str,
+            history: list = None,
+            name: str = "",
+            introduction: str = ""
+    ):
+        """Gửi câu hỏi với personalization (streaming mode)"""
         try:
             payload = {
                 "question": question,
-                "history": self.chat_history,
-                "stream": True
+                "history": history or [],
+                "stream": True,
+                "name": name,
+                "introduction": introduction
             }
 
-            print(f"\n❓ Câu hỏi: {question}")
-            print("💬 Trả lời: ", end='', flush=True)
-
-            start_time = time.time()
-            first_chunk_time = None
-
-            full_answer = ""
-            references = []
+            print("\n" + "=" * 70)
+            print(f"👤 Khách hàng: {name or 'Không cung cấp'}")
+            print(f"💼 Giới thiệu: {introduction or 'Không cung cấp'}")
+            print(f"❓ Câu hỏi: {question}")
+            print("=" * 70)
+            print("\n💬 Trả lời: ", end='', flush=True)
 
             with self.session.post(
                     f"{self.base_url}/chat",
@@ -61,6 +68,7 @@ class StreamingChatClient:
                     print(f"\n🔴 Error: {response.status_code}")
                     return
 
+                personalized = False
                 for line in response.iter_lines():
                     if not line:
                         continue
@@ -77,53 +85,53 @@ class StreamingChatClient:
                         chunk_type = chunk_data.get("type")
 
                         if chunk_type == "chunk":
-                            # ⏱️ FIRST CHUNK TIMING
-                            if first_chunk_time is None:
-                                first_chunk_time = time.time()
-                                latency = first_chunk_time - start_time - 1
-
                             content = chunk_data.get("content", "")
                             print(content, end="", flush=True)
-                            full_answer += content
 
                         elif chunk_type == "references":
                             references = chunk_data.get("references", [])
+                            if references:
+                                print(f"\n\n📚 Tài liệu tham khảo ({len(references)}):")
+                                for i, ref in enumerate(references, 1):
+                                    print(f"   {i}. {ref.get('type')}: {ref.get('document_id')}")
 
                         elif chunk_type == "end":
-                            print("\n\n📊 Status:", chunk_data.get("status", "SUCCESS"))
+                            personalized = chunk_data.get("personalized", False)
+                            status = chunk_data.get("status", "SUCCESS")
+                            print(f"\n\n✅ Status: {status}")
+                            print(f"🎭 Personalized: {'Yes' if personalized else 'No'}")
 
                     except json.JSONDecodeError:
                         continue
 
-            end_time = time.time()
-
-            # Update history
-            self.chat_history.extend([
-                {"role": "user", "content": question},
-                {"role": "assistant", "content": full_answer}
-            ])
-
-            print(f"⏱️  Total streaming time: {latency:.2f}s")
-            print("=" * 60)
+            print("=" * 70 + "\n")
 
         except Exception as e:
             print(f"\n❌ Error: {e}")
 
-    def send_message_non_streaming(self, question: str) -> None:
-        """
-        Gửi câu hỏi với non-streaming mode (original)
-        """
+    def send_personalized_message_non_streaming(
+            self,
+            question: str,
+            history: list = None,
+            name: str = "",
+            introduction: str = ""
+    ):
+        """Gửi câu hỏi với personalization (non-streaming mode)"""
         try:
             payload = {
                 "question": question,
-                "history": self.chat_history,
-                "stream": False  # Disable streaming
+                "history": history or [],
+                "stream": False,
+                "name": name,
+                "introduction": introduction
             }
 
-            print(f"\n❓ Câu hỏi: {question}")
-            print("⏳ Đang xử lý...")
-
-            start_time = time.time()
+            print("\n" + "=" * 70)
+            print(f"👤 Khách hàng: {name or 'Không cung cấp'}")
+            print(f"💼 Giới thiệu: {introduction or 'Không cung cấp'}")
+            print(f"❓ Câu hỏi: {question}")
+            print("=" * 70)
+            print("\n⏳ Đang xử lý...")
 
             response = self.session.post(
                 f"{self.base_url}/chat",
@@ -131,79 +139,99 @@ class StreamingChatClient:
                 timeout=60
             )
 
-            end_time = time.time()
-
             if response.status_code == 200:
                 result = response.json()
 
                 print(f"\n💬 Trả lời:\n{result['answer']}")
-                print(f"\n⏱️  Thời gian: {end_time - start_time:.2f}s")
-                print(f"📊 Status: {result.get('status', 'UNKNOWN')}")
+                print(f"\n🎭 Personalized: {result.get('personalized', False)}")
+                print(f"✅ Status: {result.get('status', 'UNKNOWN')}")
 
-                # Update history
-                self.chat_history.append({"role": "user", "content": question})
-                self.chat_history.append({"role": "assistant", "content": result['answer']})
-
-                # Display references
                 if result.get("references"):
-                    print(f"\n📚 Tài liệu tham khảo:")
-                    for i, ref in enumerate(result["references"], 1):
-                        print(f"  {i}. {ref['type']}: {ref['document_id']}")
+                    print(f"\n📚 Tài liệu tham khảo ({len(result['references'])}):")
+                    for i, ref in enumerate(result['references'], 1):
+                        print(f"   {i}. {ref['type']}: {ref['document_id']}")
 
-                print("=" * 60)
+                print("=" * 70 + "\n")
             else:
                 print(f"🔴 Error {response.status_code}: {response.text}")
 
         except Exception as e:
             print(f"❌ Error: {e}")
 
-    def compare_streaming_vs_non_streaming(self, question: str):
-        """So sánh streaming vs non-streaming"""
-        print("\n" + "=" * 60)
-        print("🔬 COMPARISON: STREAMING vs NON-STREAMING")
-        print("=" * 60)
+    def test_scenarios(self):
+        """Test các scenarios khác nhau"""
+        print("\n🧪 TESTING PERSONALIZATION SCENARIOS")
+        print("=" * 70 + "\n")
 
-        # Test 1: Non-streaming
-        print("\n[1] NON-STREAMING MODE:")
-        print("-" * 60)
-        self.send_message_non_streaming(question)
+        # Scenario 1: CEO level
+        print("📋 Scenario 1: CEO Level Customer")
+        self.send_personalized_message_streaming(
+            question="Nền tảng chuyển đổi số cho doanh nghiệp là gì?",
+            name="Nguyễn Hoàng Long",
+            introduction="Tổng giám đốc công ty công nghệ và truyền thông VTC NetViet",
+            history=[
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Xin chào quý khách, tôi là trợ lý ảo Onetouch."}
+            ]
+        )
 
-        # Clear history for fair comparison
-        self.chat_history.clear()
+        input("\n⏸️  Press Enter để tiếp tục scenario 2...")
 
-        # Test 2: Streaming
-        print("\n[2] STREAMING MODE:")
-        print("-" * 60)
-        self.send_message_streaming(question)
+        # Scenario 2: Manager level
+        print("\n📋 Scenario 2: Manager Level Customer")
+        self.send_personalized_message_streaming(
+            question="Làm sao triển khai AI trong doanh nghiệp?",
+            name="Trần Văn An",
+            introduction="Trưởng phòng IT tại công ty Công nghệ ABC",
+            history=[]
+        )
 
-        print("\n" + "=" * 60)
-        print("✅ COMPARISON COMPLETE")
-        print("=" * 60)
+        input("\n⏸️  Press Enter để tiếp tục scenario 3...")
+
+        # Scenario 3: No personalization info
+        print("\n📋 Scenario 3: No Personalization Info (Generic)")
+        self.send_personalized_message_streaming(
+            question="Trợ lý ảo là gì?",
+            name="",
+            introduction="",
+            history=[]
+        )
+
+        input("\n⏸️  Press Enter để tiếp tục scenario 4...")
+
+        # Scenario 4: Staff level
+        print("\n📋 Scenario 4: Staff Level Customer")
+        self.send_personalized_message_streaming(
+            question="Hướng dẫn sử dụng Excel cơ bản",
+            name="Lê Thị Mai",
+            introduction="Nhân viên văn phòng tại công ty XYZ",
+            history=[]
+        )
 
     def interactive_mode(self):
         """Chế độ chat tương tác"""
-        print("🚀 Streaming Chat Client Started!")
-        print("-" * 50)
+        print("🚀 Personalized Chat Client Started!")
+        print("-" * 70)
 
         if not self.check_health():
             print("❌ Không thể kết nối tới API!")
             return
 
         print("\n💡 Commands:")
-        print("  /stream   - Gửi câu hỏi với streaming")
-        print("  /normal   - Gửi câu hỏi không streaming")
-        print("  /compare  - So sánh streaming vs non-streaming")
-        print("  /history  - Xem lịch sử")
-        print("  /clear    - Xóa lịch sử")
+        print("  /test     - Run test scenarios")
+        print("  /profile  - Set customer profile (name, introduction)")
+        print("  /clear    - Clear customer profile")
         print("  /quit     - Thoát")
-        print("\n" + "=" * 50)
+        print("\n" + "=" * 70)
 
-        streaming_mode = True  # Default: streaming
+        # Customer profile
+        customer_name = ""
+        customer_introduction = ""
+        history = []
 
         while True:
             try:
-                mode_indicator = "🔄 STREAMING" if streaming_mode else "📋 NORMAL"
-                question = input(f"\n[{mode_indicator}] ❓ Câu hỏi: ").strip()
+                question = input(f"\n❓ Câu hỏi: ").strip()
 
                 if not question:
                     continue
@@ -212,33 +240,33 @@ class StreamingChatClient:
                 if question == "/quit":
                     print("👋 Tạm biệt!")
                     break
-                elif question == "/stream":
-                    streaming_mode = True
-                    print("✅ Switched to STREAMING mode")
-                elif question == "/normal":
-                    streaming_mode = False
-                    print("✅ Switched to NON-STREAMING mode")
-                elif question == "/compare":
-                    test_q = input("Câu hỏi để test: ").strip()
-                    if test_q:
-                        self.compare_streaming_vs_non_streaming(test_q)
-                elif question == "/history":
-                    if self.chat_history:
-                        print("\n📜 Lịch sử chat:")
-                        for msg in self.chat_history:
-                            role = "👤" if msg["role"] == "user" else "🤖"
-                            print(f"{role} {msg['content'][:100]}...")
-                    else:
-                        print("📝 Chưa có lịch sử")
+
+                elif question == "/test":
+                    self.test_scenarios()
+
+                elif question == "/profile":
+                    customer_name = input("👤 Tên: ").strip()
+                    customer_introduction = input("💼 Giới thiệu: ").strip()
+                    print(f"✅ Profile updated: {customer_name} - {customer_introduction[:50]}...")
+
                 elif question == "/clear":
-                    self.chat_history.clear()
-                    print("🗑️  Đã xóa lịch sử")
+                    customer_name = ""
+                    customer_introduction = ""
+                    history = []
+                    print("🗑️  Đã xóa profile và lịch sử")
+
                 else:
                     # Send question
-                    if streaming_mode:
-                        self.send_message_streaming(question)
-                    else:
-                        self.send_message_non_streaming(question)
+                    self.send_personalized_message_streaming(
+                        question=question,
+                        history=history,
+                        name=customer_name,
+                        introduction=customer_introduction
+                    )
+
+                    # Update history
+                    history.append({"role": "user", "content": question})
+                    # Note: Should capture actual answer, but simplified for demo
 
             except KeyboardInterrupt:
                 print("\n👋 Tạm biệt!")
@@ -249,17 +277,18 @@ class StreamingChatClient:
 
 def main():
     """Main function"""
-    if len(sys.argv) > 1:
-        # Single question mode
-        client = StreamingChatClient()
-        question = " ".join(sys.argv[1:])
+    print("\n" + "=" * 70)
+    print("🎭 PERSONALIZED RAG CHATBOT CLIENT")
+    print("=" * 70 + "\n")
 
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        # Test mode
+        client = PersonalizedChatClient()
         if client.check_health():
-            print("\n🔬 Testing both modes:\n")
-            client.compare_streaming_vs_non_streaming(question)
+            client.test_scenarios()
     else:
         # Interactive mode
-        client = StreamingChatClient()
+        client = PersonalizedChatClient()
         client.interactive_mode()
 
 
